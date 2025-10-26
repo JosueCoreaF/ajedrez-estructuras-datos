@@ -3,12 +3,15 @@ import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image } fr
 import Board from '../components/Board';
 import { ChessEngine } from '../engine/ChessEngine';
 import PIECE_IMAGES from '../components/icons';
+import { TextInput } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function GameScreen() {
+export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, onExit }) {
 	const engineRef = useRef();
 	const [board, setBoard] = useState([]);
 	const [selected, setSelected] = useState(null);
-		const [status, setStatus] = useState('');
+	const [status, setStatus] = useState('');
+	const [loadedSavedId, setLoadedSavedId] = useState(null);
 		const [highlights, setHighlights] = useState([]);
 		const [attackers, setAttackers] = useState([]);
 		const [gameOver, setGameOver] = useState(false);
@@ -18,9 +21,175 @@ export default function GameScreen() {
 		// Inicializar el motor y cargar el tablero inicial
 		engineRef.current = new ChessEngine();
 		setBoard(engineRef.current.getBoard());
+		// Si entramos en modo replay, reiniciamos el motor y cargamos el tablero inicial
+		if (mode === 'replay' && replayLog) {
+			// prepare engine for replay (animado si el usuario lanza reproducir)
+			engineRef.current = new ChessEngine();
+			setBoard(engineRef.current.getBoard());
+		}
+
+		// Si entramos en modo resume, aplicar inmediatamente los movimientos guardados
+		if (mode === 'resume' && replayLog) {
+			engineRef.current = new ChessEngine();
+			const moves = parseMovesFromLog(replayLog);
+			for (const m of moves) {
+				// Intentar aplicar con el motor para mantener moveHistory y estado consistente
+				const ok = engineRef.current.movePiece(m.from, m.to);
+				if (!ok) {
+					// Si por alguna razón el motor rechaza (log externo), aplicamos el movimiento directo
+					const piece = engineRef.current.board[m.from.row][m.from.col];
+					engineRef.current.board[m.to.row][m.to.col] = piece;
+					engineRef.current.board[m.from.row][m.from.col] = null;
+					// NOTA: en este fallback no se registra moveHistory correctamente, pero los logs guardados
+					// que generó nuestra app deberían ser aplicables por movePiece.
+				}
+			}
+			setBoard(engineRef.current.getBoard());
+			// ajustar lastMove al último movimiento aplicado
+			if (engineRef.current.moveHistory.length) {
+				const lm = engineRef.current.moveHistory[engineRef.current.moveHistory.length - 1];
+				setLastMove({ from: lm.from, to: lm.to });
+			}
+			// guardar metadata de la partida cargada para permitir actualizarla
+			if (savedName) setSaveName(savedName);
+			if (savedId) setLoadedSavedId(savedId);
+			setStatus('Partida cargada: lista para continuar');
+		}
 	}, []);
 
-	const handleSquarePress = ({ row, col }) => {
+	// --- Estado y helpers para guardar partida (local) ---
+	const [saveModalVisible, setSaveModalVisible] = useState(false);
+	const [saveName, setSaveName] = useState('');
+
+	function buildLogFromHistory() {
+		if (!engineRef.current) return '';
+		const header = `Partida iniciada: ${new Date().toISOString()}`;
+		const lines = (engineRef.current.moveHistory || []).map(m => {
+			const pieceId = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
+			return `Movimiento ejecutado: ${pieceId} de ${m.from.row},${m.from.col} a ${m.to.row},${m.to.col}`;
+		});
+		return [header].concat(lines).join('\n');
+	}
+
+	async function finalizeMatch(winnerColor) {
+		try {
+			const winnerName = winnerColor === 'w' ? 'Blancas' : 'Negras';
+			const finalLog = buildLogFromHistory() + `\nPartida finalizada: ${new Date().toISOString()}\nResultado: Ganador: ${winnerName}`;
+			const payload = {
+				id: `match-${Date.now()}`,
+				name: saveName || `Partida ${new Date().toISOString()}`,
+				winner: winnerColor,
+				winnerName,
+				endedAt: new Date().toISOString(),
+				movesCount: engineRef.current ? (engineRef.current.moveHistory || []).length : 0,
+				log_text: finalLog
+			};
+			// Guardar en historial
+			const rawHist = await AsyncStorage.getItem('match_history');
+			const hist = rawHist ? JSON.parse(rawHist) : [];
+			hist.push(payload);
+			await AsyncStorage.setItem('match_history', JSON.stringify(hist));
+
+			// Si la partida cargada venía de saved_games, eliminarla
+			if (loadedSavedId) {
+				const rawSaved = await AsyncStorage.getItem('saved_games');
+				const savedArr = rawSaved ? JSON.parse(rawSaved) : [];
+				const filtered = savedArr.filter(s => String(s.id) !== String(loadedSavedId));
+				await AsyncStorage.setItem('saved_games', JSON.stringify(filtered));
+				setLoadedSavedId(null);
+			}
+			setStatus(`Partida finalizada: Ganador ${winnerName}`);
+		} catch (e) {
+			console.warn('Error guardando historial de partida', e);
+			setStatus('Partida finalizada (error guardando historial)');
+		}
+	}
+
+	async function saveToLocal() {
+		const payload = { id: `local-${Date.now()}`, name: saveName || `Partida ${new Date().toISOString()}`, log_text: buildLogFromHistory(), savedAt: new Date().toISOString() };
+		try {
+			setStatus('Guardando localmente...');
+			const raw = await AsyncStorage.getItem('saved_games');
+			const arr = raw ? JSON.parse(raw) : [];
+			arr.push(payload);
+			await AsyncStorage.setItem('saved_games', JSON.stringify(arr));
+			setStatus('Partida guardada localmente');
+			setSaveModalVisible(false);
+			// Marcar que ahora la partida actual corresponde a la guardada (para futuras actualizaciones)
+			setLoadedSavedId(payload.id);
+		} catch (e) {
+			setStatus('Error guardando localmente: ' + String(e));
+		}
+	}
+
+	async function updateToLocal() {
+		if (!loadedSavedId) {
+			setStatus('No hay partida cargada para actualizar');
+			return;
+		}
+		try {
+			setStatus('Actualizando partida...');
+			const raw = await AsyncStorage.getItem('saved_games');
+			const arr = raw ? JSON.parse(raw) : [];
+			const idx = arr.findIndex(g => String(g.id) === String(loadedSavedId));
+			if (idx === -1) {
+				setStatus('No se encontró la partida local para actualizar');
+				return;
+			}
+			arr[idx].log_text = buildLogFromHistory();
+			arr[idx].savedAt = new Date().toISOString();
+			// keep name unless user changed it
+			arr[idx].name = saveName || arr[idx].name;
+			await AsyncStorage.setItem('saved_games', JSON.stringify(arr));
+			setStatus('Partida actualizada');
+		} catch (e) {
+			setStatus('Error actualizando: ' + String(e));
+		}
+	}
+
+	// --- Replayer state ---
+	const [replayMoves, setReplayMoves] = useState([]);
+	const [isPlaying, setIsPlaying] = useState(false);
+
+	function parseMovesFromLog(logText) {
+		const lines = String(logText).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+		const moves = [];
+		for (const line of lines) {
+			const m = line.match(/Movimiento ejecutado:\s*\w+\s+de\s+(\d+),(\d+)\s+a\s+(\d+),(\d+)/);
+			if (m) {
+				moves.push({ from: { row: parseInt(m[1], 10), col: parseInt(m[2], 10) }, to: { row: parseInt(m[3], 10), col: parseInt(m[4], 10) }, raw: line });
+			}
+		}
+		return moves;
+	}
+
+	async function playReplay(logText, speed = 500) {
+		if (!logText) return;
+		const moves = parseMovesFromLog(logText);
+		setReplayMoves(moves);
+		setIsPlaying(true);
+		// reset engine
+		engineRef.current = new ChessEngine();
+		setBoard(engineRef.current.getBoard());
+		for (let i = 0; i < moves.length; i++) {
+			if (!isPlaying) break;
+			const m = moves[i];
+			// intentar mover con el engine (valida reglas)
+			const ok = engineRef.current.movePiece(m.from, m.to);
+			if (!ok) {
+				// si falla, aplicar directamente (fallback)
+				const piece = engineRef.current.board[m.from.row][m.from.col];
+				engineRef.current.board[m.to.row][m.to.col] = piece;
+				engineRef.current.board[m.from.row][m.from.col] = null;
+			}
+			setBoard(engineRef.current.getBoard());
+			setLastMove({ from: m.from, to: m.to });
+			await new Promise(res => setTimeout(res, speed));
+		}
+		setIsPlaying(false);
+	}
+
+	const handleSquarePress = async ({ row, col }) => {
 		if (!engineRef.current) return;
 		if (gameOver) {
 			// Partida terminada: ignorar interacciones posteriores (status ya indica resultado)
@@ -95,8 +264,12 @@ export default function GameScreen() {
 				const attackersList = engineRef.current.getAttackersOfKing(opponent);
 				setAttackers(attackersList);
 				if (engineRef.current.isCheckmate(opponent)) {
+					// El oponente está en jaque mate -> el jugador que movió ha ganado
+					const winner = opponent === 'w' ? 'b' : 'w';
 					setStatus('Jaque mate');
 					setGameOver(true);
+					// Finalizar la partida: guardar en historial y eliminar la partida guardada si aplica
+					await finalizeMatch(winner);
 				} else {
 					setStatus('Jaque');
 				}
@@ -191,6 +364,21 @@ export default function GameScreen() {
 	return (
 		<View style={styles.container}>
 			<Text style={styles.title}>Ajedrez — Tablero</Text>
+
+			{mode === 'replay' && savedName ? <Text style={{ fontWeight: '600', marginBottom: 8 }}>Reproduciendo: {savedName}</Text> : null}
+			{mode === 'replay' && replayLog ? (
+				<View style={{ flexDirection: 'row', marginBottom: 8 }}>
+					<TouchableOpacity style={styles.ctrlBtn} onPress={() => { if (!isPlaying) playReplay(replayLog); }}>
+						<Text style={styles.ctrlText}>{isPlaying ? 'Reproduciendo...' : 'Reproducir'}</Text>
+					</TouchableOpacity>
+					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#999' }]} onPress={() => { setIsPlaying(false); }}>
+						<Text style={styles.ctrlText}>Pausar</Text>
+					</TouchableOpacity>
+					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#666' }]} onPress={() => { onExit && onExit(); }}>
+						<Text style={styles.ctrlText}>Salir</Text>
+					</TouchableOpacity>
+				</View>
+			) : null}
 			<Text style={styles.status}>{status}</Text>
 
 			{/* Captured pieces panel */}
@@ -227,7 +415,34 @@ export default function GameScreen() {
 				<TouchableOpacity style={styles.ctrlBtn} onPress={restartGame}>
 					<Text style={styles.ctrlText}>Reiniciar</Text>
 				</TouchableOpacity>
+				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => {
+					if (loadedSavedId) {
+						// Actualizar sin pedir nombre
+						updateToLocal();
+					} else {
+						setSaveModalVisible(true);
+					}
+				}}>
+					<Text style={styles.ctrlText}>Guardar</Text>
+				</TouchableOpacity>
+				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#666' }]} onPress={() => { if (typeof onExit === 'function') onExit(); }}>
+					<Text style={styles.ctrlText}>Salir</Text>
+				</TouchableOpacity>
 			</View>
+
+			{/* Modal para guardar partida (local) */}
+			<Modal visible={saveModalVisible} transparent animationType="fade">
+				<View style={styles.modalBackdrop}>
+					<View style={[styles.modalCard, { width: '90%' }] }>
+						<Text style={styles.modalTitle}>Guardar partida (local)</Text>
+						<TextInput placeholder="Nombre de la partida" value={saveName} onChangeText={setSaveName} style={{ width: '100%', borderWidth: 1, borderColor:'#ddd', padding:8, borderRadius:6, marginBottom:12 }} />
+						<View style={{ flexDirection:'row', width:'100%' }}>
+							<TouchableOpacity style={styles.btn} onPress={saveToLocal}><Text style={styles.btnText}>Guardar</Text></TouchableOpacity>
+							<TouchableOpacity style={[styles.btn, styles.btnClose, { marginLeft: 8 }]} onPress={() => setSaveModalVisible(false)}><Text style={styles.btnText}>Cancelar</Text></TouchableOpacity>
+						</View>
+					</View>
+				</View>
+			</Modal>
 			{/* Si hay jaque/attackers visibles, ocultamos el resaltado del último movimiento */}
 			<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} />
 
