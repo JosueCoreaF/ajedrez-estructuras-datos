@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image } from 'react-native';
 import Board from '../components/Board';
 import { ChessEngine } from '../engine/ChessEngine';
+import PIECE_IMAGES from '../components/icons';
 
 export default function GameScreen() {
 	const engineRef = useRef();
@@ -78,6 +79,14 @@ export default function GameScreen() {
 			setSelected(null);
 			setHighlights([]);
 			setLastMove({ from: selected, to: { row, col } });
+
+			// Comprobar empate por solo reyes
+			if (engineRef.current.isOnlyKingsLeft && engineRef.current.isOnlyKingsLeft()) {
+				setStatus('Empate: solo quedan los reyes');
+				setAttackers([]);
+				setGameOver(true);
+				return;
+			}
 			// Después del movimiento, comprobar jaque / jaque mate para el oponente
 			const opponent = engineRef.current.currentTurn; // ya fue cambiado en movePiece
 			// Nota: el motor no elimina al rey ni debe permitir capturarlo.
@@ -138,9 +147,11 @@ export default function GameScreen() {
 	const restartGame = () => {
 		engineRef.current = new ChessEngine();
 		setBoard(engineRef.current.getBoard());
+		// Limpiar todo el estado visual para evitar marcas residuales
 		setSelected(null);
 		setHighlights([]);
 		setAttackers([]);
+		setLastMove(null);
 		setGameOver(false);
 		setStatus('');
 	};
@@ -149,10 +160,29 @@ export default function GameScreen() {
 		if (!engineRef.current) return;
 		const undone = engineRef.current.undoMove();
 		if (undone) {
+			// Actualizar tablero y limpiar resaltados
 			setBoard(engineRef.current.getBoard());
-			setStatus('Movimiento deshecho');
-			setGameOver(false);
+			setSelected(null);
+			setHighlights([]);
 			setAttackers([]);
+			setGameOver(false);
+			setStatus('Movimiento deshecho');
+			// Actualizar lastMove al movimiento anterior en el historial (o null si no hay)
+			const mh = engineRef.current.moveHistory;
+			if (mh && mh.length) {
+				const lm = mh[mh.length - 1];
+				setLastMove({ from: lm.from, to: lm.to });
+			} else {
+				setLastMove(null);
+			}
+
+			// Comprobar empate por solo reyes tras deshacer
+			if (engineRef.current.isOnlyKingsLeft && engineRef.current.isOnlyKingsLeft()) {
+				setStatus('Empate: solo quedan los reyes');
+				setGameOver(true);
+			} else {
+				setGameOver(false);
+			}
 		} else {
 			setStatus('No hay movimientos para deshacer');
 		}
@@ -162,6 +192,33 @@ export default function GameScreen() {
 		<View style={styles.container}>
 			<Text style={styles.title}>Ajedrez — Tablero</Text>
 			<Text style={styles.status}>{status}</Text>
+
+			{/* Captured pieces panel */}
+			<View style={styles.capturesRow}>
+				{/* Piezas negras capturadas (capturadas por blancas) */}
+				<View style={styles.captureColumn}>
+					<Text style={styles.captureLabel}>Capturadas (negras)</Text>
+					<View style={styles.captureList}>
+						{engineRef.current && engineRef.current.getCapturedPieces().b.map((p, i) => {
+							const key = `${p.color}${p.type}`;
+							const src = PIECE_IMAGES[key];
+							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
+						})}
+					</View>
+				</View>
+
+				{/* Piezas blancas capturadas (capturadas por negras) */}
+				<View style={styles.captureColumn}>
+					<Text style={styles.captureLabel}>Capturadas (blancas)</Text>
+					<View style={styles.captureList}>
+						{engineRef.current && engineRef.current.getCapturedPieces().w.map((p, i) => {
+							const key = `${p.color}${p.type}`;
+							const src = PIECE_IMAGES[key];
+							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
+						})}
+					</View>
+				</View>
+			</View>
 			{/* Controls bar */}
 			<View style={styles.controls}>
 				<TouchableOpacity style={styles.ctrlBtn} onPress={undoLastMove}>
@@ -173,6 +230,21 @@ export default function GameScreen() {
 			</View>
 			{/* Si hay jaque/attackers visibles, ocultamos el resaltado del último movimiento */}
 			<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} />
+
+			{/* Move history panel */}
+			<View style={styles.historyContainer}>
+				<Text style={styles.historyTitle}>Historial</Text>
+				<ScrollView style={styles.historyList}>
+					{engineRef.current && engineRef.current.moveHistory.map((m, idx) => {
+						const pc = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
+						return (
+							<View key={idx} style={styles.historyItem}>
+								<Text style={styles.historyText}>{idx + 1}. {pc} {m.from.row},{m.from.col} → {m.to.row},{m.to.col}{m.capturedPiece ? ` x ${m.capturedPiece.color}${m.capturedPiece.type}` : ''}{m.special && m.special.promoted ? ' (promo)' : ''}</Text>
+							</View>
+						)
+						})}
+				</ScrollView>
+			</View>
 
 			{/* Modal de fin de partida */}
 			<Modal visible={gameOver} transparent animationType="fade">
@@ -275,5 +347,55 @@ const styles = StyleSheet.create({
 		fontSize: 20,
 		fontWeight: '700',
 		marginBottom: 12,
+	},
+
+	capturesRow: {
+		width: '100%',
+		flexDirection: 'row',
+		justifyContent: 'space-between',
+		marginBottom: 8,
+	},
+	captureColumn: {
+		alignItems: 'center',
+		flex: 1,
+	},
+	captureLabel: {
+		fontSize: 12,
+		color: '#444',
+		marginBottom: 4,
+	},
+	captureList: {
+		flexDirection: 'row',
+		flexWrap: 'wrap',
+		justifyContent: 'center'
+	},
+	captureImg: {
+		width: 28,
+		height: 28,
+		margin: 4,
+	},
+
+	historyContainer: {
+		width: '100%',
+		maxHeight: 140,
+		marginTop: 10,
+		borderTopWidth: 1,
+		borderTopColor: '#eee',
+		paddingTop: 8,
+	},
+	historyTitle: {
+		fontWeight: '700',
+		marginBottom: 6,
+		textAlign: 'center'
+	},
+	historyList: {
+		width: '100%'
+	},
+	historyItem: {
+		paddingVertical: 4,
+		paddingHorizontal: 8,
+	},
+	historyText: {
+		color: '#333'
 	},
 });

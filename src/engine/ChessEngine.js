@@ -14,6 +14,10 @@ export class ChessEngine {
   // ESTA ES OTRA ESTRUCTURA DE DATOS CLAVE (Lista/Pila)
   moveHistory = []; 
 
+  // Registro explícito de piezas capturadas (por color de la pieza capturada)
+  // capturedPieces.w = array de piezas blancas que han sido capturadas
+  // capturedPieces.b = array de piezas negras que han sido capturadas
+  capturedPieces = { w: [], b: [] };
   currentTurn = COLORS.WHITE;
 
   constructor() {
@@ -21,10 +25,24 @@ export class ChessEngine {
     // Usamos una copia profunda para no modificar la constante original
   // Copia profunda ligera: clonar objetos de pieza para evitar mutar la constante original
   this.board = INITIAL_BOARD.map(row => row.map(cell => cell ? { ...cell } : null));
+    // Asegurar hasMoved = false para todas las piezas recién clonadas
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        if (this.board[r][c]) this.board[r][c].hasMoved = false;
+      }
+    }
     // Nota: el rey NO se elimina del tablero en reglas correctas.
     // No inicializamos gameOver/winner aquí — la detección de jaque mate
     // se realiza mediante isCheckmate(color) y la UI debe reaccionar.
     console.log("Motor de Ajedrez Inicializado. Turno: Blanco");
+  }
+
+  // Devuelve una copia del registro de piezas capturadas
+  getCapturedPieces() {
+    return {
+      w: this.capturedPieces.w.map(p => ({ ...p })),
+      b: this.capturedPieces.b.map(p => ({ ...p })),
+    };
   }
 
   // =======================================================
@@ -57,8 +75,63 @@ export class ChessEngine {
     
     // ... (El resto de la lógica de movePiece es la misma: capturar, mover, guardar en historial, cambiar turno)
     const piece = this.board[from.row][from.col];
-    const capturedPiece = this.board[to.row][to.col];
-    
+    let capturedPiece = this.board[to.row][to.col];
+
+    // Preparar el objeto de historial con posibilidad de marcar jugadas especiales
+    const moveRecord = { from, to, piece: { ...piece }, capturedPiece: capturedPiece ? { ...capturedPiece } : null, special: {} };
+
+    // Detectar EN PASSANT: captura al volar sobre un peón que avanzó 2 casillas
+    if (piece.type === 'p') {
+      const dir = piece.color === 'w' ? -1 : 1;
+      const rowDiff = to.row - from.row;
+      const colDiff = to.col - from.col;
+      // Captura diagonal a una casilla vacía => posible en-passant
+      if (Math.abs(colDiff) === 1 && rowDiff === dir && this.board[to.row][to.col] === null) {
+        // Revisar último movimiento del adversario
+        const last = this.moveHistory.length ? this.moveHistory[this.moveHistory.length - 1] : null;
+        if (last && last.piece && last.piece.type === 'p' && last.piece.color !== piece.color) {
+          // Si el último peón avanzó 2 casillas y quedó al lado de nuestro peón
+          if (Math.abs(last.from.row - last.to.row) === 2 && last.to.row === from.row && last.to.col === to.col) {
+            // En passant válido: la pieza capturada está en last.to
+            capturedPiece = { ...this.board[last.to.row][last.to.col] };
+            moveRecord.capturedPiece = capturedPiece ? { ...capturedPiece } : null;
+            moveRecord.special.isEnPassant = true;
+            moveRecord.special.enPassantCaptured = { row: last.to.row, col: last.to.col };
+            // Remover la pieza capturada del tablero (sera colocada en capturedPieces abajo)
+            this.board[last.to.row][last.to.col] = null;
+          }
+        }
+      }
+    }
+
+    // Detectar ENROQUE (Castling): si el rey se mueve dos casillas horizontalmente
+    if (piece.type === 'k' && from.row === to.row && Math.abs(to.col - from.col) === 2) {
+      const dir = to.col - from.col > 0 ? 1 : -1; // 1 = king-side, -1 = queen-side
+      const rookCol = dir === 1 ? 7 : 0;
+      const rook = this.board[from.row][rookCol];
+      if (rook && rook.type === 'r' && rook.color === piece.color && !rook.hasMoved && !piece.hasMoved) {
+        // Verificar que el camino entre rey y torre esté despejado
+        const pathFrom = { row: from.row, col: from.col + dir };
+        const pathTo = { row: from.row, col: from.col + 2 * dir };
+        if (this._isPathClear(from, { row: from.row, col: rookCol })) {
+          // Verificar que el rey no esté en jaque y que las casillas por las que pasa no estén atacadas
+          const opponent = piece.color === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
+          if (!this.isKingInCheck(piece.color) && !this.isSquareAttacked(pathFrom, opponent) && !this.isSquareAttacked(pathTo, opponent)) {
+            // Ejecutar enroque moviendo la torre
+            const rookFrom = { row: from.row, col: rookCol };
+            const rookTo = { row: from.row, col: from.col + dir };
+            moveRecord.special.isCastling = true;
+            moveRecord.special.rookFrom = rookFrom;
+            moveRecord.special.rookTo = rookTo;
+            moveRecord.special.rookPiece = rook ? { ...rook } : null;
+            // mover la torre en el tablero (la torre será movida antes de aplicar el movimiento del rey abajo)
+            this.board[rookTo.row][rookTo.col] = { ...rook };
+            this.board[rookFrom.row][rookFrom.col] = null;
+          }
+        }
+      }
+    }
+
     // Mover la pieza (clonamos para historial)
     this.board[to.row][to.col] = { ...piece };
     this.board[from.row][from.col] = null; 
@@ -69,10 +142,14 @@ export class ChessEngine {
       if (movedPiece.color === COLORS.WHITE && to.row === 0) {
         // Peón blanco llega a fila 0 -> promociona a reina
         this.board[to.row][to.col].type = 'q';
+        moveRecord.special.promoted = true;
+        moveRecord.special.promotedTo = 'q';
       }
       if (movedPiece.color === COLORS.BLACK && to.row === 7) {
         // Peón negro llega a fila 7 -> promociona a reina
         this.board[to.row][to.col].type = 'q';
+        moveRecord.special.promoted = true;
+        moveRecord.special.promotedTo = 'q';
       }
     }
 
@@ -83,8 +160,17 @@ export class ChessEngine {
       return false;
     }
 
-    // Guardar historial con copias para undo
-    this.moveHistory.push({ from, to, piece: { ...piece }, capturedPiece: capturedPiece ? { ...capturedPiece } : null });
+    // Marcar hasMoved en la pieza movida (ayuda para enroque)
+    if (this.board[to.row][to.col]) this.board[to.row][to.col].hasMoved = true;
+
+    // Registrar capturas explícitamente
+    if (moveRecord.capturedPiece) {
+      // Guardar copia en el registro de capturas
+      this.capturedPieces[moveRecord.capturedPiece.color].push({ ...moveRecord.capturedPiece });
+    }
+
+    // Guardar historial extendido
+    this.moveHistory.push(moveRecord);
 
     this.currentTurn = this.currentTurn === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
 
@@ -106,15 +192,47 @@ export class ChessEngine {
     const lastMove = this.moveHistory.pop(); 
 
     // Revertir el movimiento:
-    // 1. Mover la pieza de vuelta a su posición original
+    // 1. Mover la pieza de vuelta a su posición original (restaurar objeto guardado)
     this.board[lastMove.from.row][lastMove.from.col] = lastMove.piece;
+
     // 2. Restaurar la pieza capturada (si la hubo)
-    this.board[lastMove.to.row][lastMove.to.col] = lastMove.capturedPiece;
-    
-    // 3. Revertir el turno
+    if (lastMove.special && lastMove.special.isEnPassant && lastMove.special.enPassantCaptured) {
+      // En passant: la captura ocurrió en una casilla distinta a 'to'
+      const capPos = lastMove.special.enPassantCaptured;
+      // Restaurar la pieza capturada en su casilla original
+      this.board[capPos.row][capPos.col] = lastMove.capturedPiece;
+      // Quitar del registro de capturas la última pieza capturada de ese color
+      if (lastMove.capturedPiece) {
+        const arr = this.capturedPieces[lastMove.capturedPiece.color];
+        if (arr && arr.length) arr.pop();
+      }
+      // La casilla 'to' debe quedar vacía (el peón se movió hacia allí)
+      this.board[lastMove.to.row][lastMove.to.col] = null;
+    } else {
+      // Normal: restaurar la pieza capturada (si la hubo) en la casilla destino
+      this.board[lastMove.to.row][lastMove.to.col] = lastMove.capturedPiece;
+      if (lastMove.capturedPiece) {
+        const arr = this.capturedPieces[lastMove.capturedPiece.color];
+        if (arr && arr.length) arr.pop();
+      }
+    }
+
+    // Si fue enroque, restaurar la torre a su posición original
+    if (lastMove.special && lastMove.special.isCastling && lastMove.special.rookFrom && lastMove.special.rookTo) {
+      const rf = lastMove.special.rookFrom;
+      const rt = lastMove.special.rookTo;
+      // Restaurar la torre
+      this.board[rf.row][rf.col] = lastMove.special.rookPiece ? { ...lastMove.special.rookPiece } : null;
+      // Limpiar la casilla donde quedó la torre tras el enroque
+      this.board[rt.row][rt.col] = null;
+    }
+
+    // 3. Revertir cualquier promoción: si hubo promoción, el piece guardado ya es el original
+    // (ya hemos restaurado lastMove.piece en la casilla 'from')
+
+    // 4. Revertir el turno
     this.currentTurn = this.currentTurn === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
 
-    console.log(`Movimiento deshecho: ${lastMove.piece} vuelto a ${lastMove.from.row},${lastMove.from.col}`);
     const lastPieceId = lastMove.piece && lastMove.piece.type ? `${lastMove.piece.color}${lastMove.piece.type}` : JSON.stringify(lastMove.piece);
     console.log(`Movimiento deshecho: ${lastPieceId} vuelto a ${lastMove.from.row},${lastMove.from.col}`);
     return true;
@@ -196,8 +314,16 @@ export class ChessEngine {
     // 3. Movimiento de CAPTURA: Diagonal
     if (colDiff === 1 && rowDiff === direction) {
       // Debe haber una pieza del oponente en el destino (targetPiece)
-      return targetPiece !== null; 
-      // NOTA: Aquí faltaría En Passant, pero es una regla muy avanzada.
+      if (targetPiece !== null) return true;
+      // En Passant: si la casilla destino está vacía, puede ser válido si el último movimiento
+      // del oponente fue un peón que avanzó 2 casillas quedando adyacente.
+      const last = this.moveHistory.length ? this.moveHistory[this.moveHistory.length - 1] : null;
+      if (last && last.piece && last.piece.type === 'p' && last.piece.color !== color) {
+        if (Math.abs(last.from.row - last.to.row) === 2 && last.to.row === from.row && last.to.col === to.col) {
+          return true; // En-passant permitido
+        }
+      }
+      return false;
     }
 
     return false;
@@ -236,7 +362,31 @@ export class ChessEngine {
   _isValidKingMove(from, to) {
     const rowDiff = Math.abs(to.row - from.row);
     const colDiff = Math.abs(to.col - from.col);
-    return Math.max(rowDiff, colDiff) === 1; // una casilla en cualquier dirección
+    // Movimiento normal de 1 casilla
+    if (Math.max(rowDiff, colDiff) === 1) return true;
+
+    // Castling: mover 2 casillas horizontalmente
+    if (rowDiff === 0 && Math.abs(colDiff) === 2) {
+      const piece = this.board[from.row][from.col];
+      if (!piece || piece.type !== 'k') return false;
+      const dir = to.col - from.col > 0 ? 1 : -1;
+      const rookCol = dir === 1 ? 7 : 0;
+      const rook = this.board[from.row][rookCol];
+      if (!rook || rook.type !== 'r' || rook.color !== piece.color) return false;
+      // Ambos no deben haberse movido
+      if (rook.hasMoved || piece.hasMoved) return false;
+      // Path must be clear between king and rook
+      if (!this._isPathClear(from, { row: from.row, col: rookCol })) return false;
+      // King must not be currently in check and cannot pass through attacked squares
+      const opponent = piece.color === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
+      const pass1 = { row: from.row, col: from.col + dir };
+      const pass2 = { row: from.row, col: from.col + 2 * dir };
+      if (this.isKingInCheck(piece.color)) return false;
+      if (this.isSquareAttacked(pass1, opponent) || this.isSquareAttacked(pass2, opponent)) return false;
+      return true;
+    }
+
+    return false;
   }
 
   // Helper: comprobar que las casillas entre from (excluido) y to (excluido) están vacías
@@ -376,6 +526,19 @@ export class ChessEngine {
         if (!p || p.color !== color) continue;
         const moves = this.generateMoves({ row: r, col: c });
         if (moves.length > 0) return false;
+      }
+    }
+    return true;
+  }
+
+  // Comprueba si en el tablero solo quedan los dos reyes (o solamente reyes)
+  // Devuelve true si no hay piezas aparte de reyes en el tablero.
+  isOnlyKingsLeft() {
+    for (let r = 0; r < 8; r++) {
+      for (let c = 0; c < 8; c++) {
+        const p = this.board[r][c];
+        if (!p) continue;
+        if (p.type !== 'k') return false;
       }
     }
     return true;

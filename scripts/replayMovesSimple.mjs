@@ -28,167 +28,207 @@ function parseMoves(logText) {
       if (m) {
         const from = { row: parseInt(m[1], 10), col: parseInt(m[2], 10) };
         const to = { row: parseInt(m[3], 10), col: parseInt(m[4], 10) };
-        moves.push({ from, to, raw: line });
+        moves.push({ type: 'move', from, to, raw: line });
       }
+    } else if (/Movimiento deshecho|Deshacer movimiento|^UNDO$/i.test(line)) {
+      // Línea que indica deshacer el último movimiento
+      moves.push({ type: 'undo', raw: line });
     }
   }
   return moves;
 }
 
-const logText = `
-LOG  Movimiento ejecutado: wp de 6,6 a 4,6
-LOG  Movimiento ejecutado: bp de 1,3 a 3,3
-LOG  Movimiento ejecutado: wp de 6,1 a 5,1
-LOG  Movimiento ejecutado: bp de 1,5 a 3,5
-LOG  Movimiento ejecutado: wn de 7,6 a 5,5
-LOG  Movimiento ejecutado: bp de 1,6 a 3,6
-LOG  Movimiento ejecutado: wp de 5,1 a 4,1
-LOG  Movimiento ejecutado: bp de 1,4 a 3,4
-LOG  Movimiento ejecutado: wp de 6,4 a 4,4
-LOG  Movimiento ejecutado: bp de 3,3 a 4,3
-LOG  Movimiento ejecutado: wp de 6,3 a 5,3
-LOG  Movimiento ejecutado: bn de 0,6 a 1,4
-LOG  Movimiento ejecutado: wp de 4,6 a 3,5
-LOG  Movimiento ejecutado: bq de 0,3 a 3,3
-LOG  Movimiento ejecutado: wp de 6,2 a 5,2
-LOG  Movimiento ejecutado: bp de 3,6 a 4,6
-LOG  Movimiento ejecutado: wp de 5,2 a 4,3
-LOG  Movimiento ejecutado: bq de 3,3 a 4,4
-LOG  Movimiento ejecutado: wk de 7,4 a 6,3
-LOG  Movimiento ejecutado: bp de 3,4 a 4,3
-LOG  Movimiento ejecutado: wk de 6,3 a 6,2
-LOG  Movimiento ejecutado: bq de 4,4 a 5,3
-LOG  Movimiento ejecutado: wk de 6,2 a 6,1
-LOG  Movimiento ejecutado: bp de 1,0 a 2,0
-LOG  Movimiento ejecutado: wp de 6,0 a 4,0
-LOG  Movimiento ejecutado: br de 0,0 a 1,0
-LOG  Movimiento ejecutado: wp de 4,1 a 3,1
-LOG  Movimiento ejecutado: bq de 5,3 a 6,2
-LOG  Movimiento ejecutado: wk de 6,1 a 5,0
-LOG  Movimiento ejecutado: bq de 6,2 a 6,1
-LOG  Movimiento ejecutado: wb de 7,2 a 6,1
-LOG  Movimiento ejecutado: bk de 0,4 a 1,3
-LOG  Movimiento ejecutado: wb de 6,1 a 4,3
-LOG  Movimiento ejecutado: bp de 4,6 a 5,5
-LOG  Movimiento ejecutado: wp de 3,5 a 2,5
-LOG  Movimiento ejecutado: bb de 0,5 a 2,7
-LOG  Movimiento ejecutado: wb de 4,3 a 3,4
-LOG  Movimiento ejecutado: bb de 2,7 a 6,3
-LOG  Movimiento ejecutado: wq de 7,3 a 6,3
-LOG  Movimiento ejecutado: bn de 1,4 a 3,3
-LOG  Movimiento ejecutado: wb de 3,4 a 1,2
-LOG  Movimiento ejecutado: br de 0,7 a 0,6
-LOG  Movimiento ejecutado: wq de 6,3 a 3,3
-LOG  Movimiento ejecutado: bk de 1,3 a 1,2
-LOG  Movimiento ejecutado: wp de 3,1 a 2,1
-LOG  Movimiento ejecutado: bk de 1,2 a 2,1
-LOG  Movimiento ejecutado: wn de 7,1 a 5,2
-LOG  Movimiento ejecutado: bb de 0,2 a 5,7
-LOG  Movimiento ejecutado: wn de 5,2 a 3,1
-LOG  Movimiento ejecutado: br de 0,6 a 1,6
-LOG  Movimiento ejecutado: wb de 7,5 a 4,2
-LOG  Movimiento ejecutado: br de 1,6 a 2,6
-LOG  Movimiento ejecutado: wq de 3,3 a 2,2
-LOG  Movimiento ejecutado: bn de 0,1 a 2,2
-LOG  Movimiento ejecutado: wn de 3,1 a 1,0
-LOG  Movimiento ejecutado: br de 2,6 a 2,5
-LOG  Movimiento ejecutado: wr de 7,7 a 7,5
-LOG  Movimiento ejecutado: bb de 5,7 a 7,5
-LOG  Movimiento ejecutado: wk de 5,0 a 5,1
-LOG  Movimiento ejecutado: bk de 2,1 a 3,0
-LOG  Movimiento ejecutado: wb de 4,2 a 3,1
-LOG  Movimiento ejecutado: bk de 3,0 a 2,1
-LOG  Movimiento ejecutado: wn de 1,0 a 2,2
-LOG  Movimiento ejecutado: bp de 2,0 a 3,1
-LOG  Movimiento ejecutado: wk de 5,1 a 6,0
-LOG  Movimiento ejecutado: bb de 7,5 a 4,2
-LOG  Movimiento ejecutado: wk de 6,0 a 7,1
-LOG  Movimiento ejecutado: br de 2,5 a 2,2
-LOG  Movimiento ejecutado: wp de 4,0 a 3,1
-LOG  Movimiento ejecutado: bb de 4,2 a 3,1
-LOG  Movimiento ejecutado: wk de 7,1 a 6,0
-LOG  Movimiento ejecutado: bb de 3,1 a 4,2
-LOG  Movimiento ejecutado: wk de 6,0 a 7,1
-LOG  Movimiento ejecutado: bk de 2,1 a 3,1
-LOG  Movimiento ejecutado: wr de 7,0 a 2,0
-LOG  Movimiento ejecutado: br de 2,2 a 2,0
-LOG  Movimiento ejecutado: wk de 7,1 a 6,2
-LOG  Movimiento ejecutado: br de 2,0 a 6,0
-LOG  Movimiento ejecutado: wk de 6,2 a 7,1
-LOG  Movimiento ejecutado: bb de 4,2 a 5,3
-LOG  Movimiento ejecutado: wk de 7,1 a 7,2
-LOG  Movimiento ejecutado: br de 6,0 a 7,0
-LOG  Movimiento ejecutado: wk de 7,2 a 6,1
-LOG  Movimiento ejecutado: bb de 5,3 a 4,2
-LOG  Movimiento ejecutado: wp de 6,7 a 4,7
-LOG  Movimiento ejecutado: bp de 1,7 a 2,7
-LOG  Movimiento ejecutado: wk de 6,1 a 7,0
-LOG  Movimiento ejecutado: bk de 3,1 a 4,1
-LOG  Movimiento ejecutado: wp de 4,7 a 3,7
-LOG  Movimiento ejecutado: bb de 4,2 a 5,3
-LOG  Movimiento ejecutado: wk de 7,0 a 6,0
-LOG  Movimiento ejecutado: bk de 4,1 a 4,0
-LOG  Movimiento ejecutado: wk de 6,0 a 7,0
-LOG  Movimiento ejecutado: bp de 1,1 a 3,1
-LOG  Movimiento ejecutado: wk de 7,0 a 6,0
-LOG  Movimiento ejecutado: bp de 3,1 a 4,1
-LOG  Movimiento ejecutado: wk de 6,0 a 7,0
-LOG  Movimiento ejecutado: bp de 4,1 a 5,1
-LOG  Movimiento ejecutado: wk de 7,0 a 6,1
-LOG  Movimiento ejecutado: bb de 5,3 a 7,1
-LOG  Movimiento ejecutado: wk de 6,1 a 7,0
-LOG  Movimiento ejecutado: bp de 5,1 a 6,1
-LOG  Movimiento ejecutado: wk de 7,0 a 6,1
-LOG  Movimiento ejecutado: bk de 4,0 a 4,1
-LOG  Movimiento ejecutado: wk de 6,1 a 7,1
-LOG  Movimiento ejecutado: bk de 4,1 a 5,1
-LOG  Movimiento ejecutado: wk de 7,1 a 7,0
-LOG  Movimiento ejecutado: bk de 5,1 a 6,2
-LOG  Movimiento ejecutado: wk de 7,0 a 6,0
-LOG  Movimiento ejecutado: bk de 6,2 a 7,2
-LOG  Movimiento ejecutado: wk de 6,0 a 7,0
-LOG  Movimiento ejecutado: bk de 7,2 a 6,3
-LOG  Movimiento ejecutado: wk de 7,0 a 7,1
-LOG  Movimiento ejecutado: bk de 6,3 a 6,4
-LOG  Movimiento ejecutado: wk de 7,1 a 6,2
-LOG  Movimiento ejecutado: bk de 6,4 a 6,5
-LOG  Movimiento ejecutado: wk de 6,2 a 6,3
-LOG  Movimiento ejecutado: bk de 6,5 a 7,6
-LOG  Movimiento ejecutado: wk de 6,3 a 7,4
-LOG  Movimiento ejecutado: bp de 5,5 a 6,5
-LOG  Movimiento ejecutado: wk de 7,4 a 7,3
-LOG  Movimiento ejecutado: bp de 6,5 a 7,5
-LOG  Movimiento ejecutado: wk de 7,3 a 6,2
-LOG  Movimiento ejecutado: bq de 7,5 a 3,5
-LOG  Movimiento ejecutado: wk de 6,2 a 6,1
-LOG  Movimiento ejecutado: bq de 3,5 a 3,7
-LOG  Movimiento ejecutado: wk de 6,1 a 7,0
-LOG  Movimiento ejecutado: bq de 3,7 a 3,0
-LOG  Movimiento ejecutado: wk de 7,0 a 7,1
-LOG  Movimiento ejecutado: bp de 2,7 a 3,7
-LOG  Movimiento ejecutado: wk de 7,1 a 6,1
-LOG  Movimiento ejecutado: bp de 3,7 a 4,7
-LOG  Movimiento ejecutado: wk de 6,1 a 7,1
-LOG  Movimiento ejecutado: bk de 7,6 a 6,5
-LOG  Movimiento ejecutado: wk de 7,1 a 6,1
-LOG  Movimiento ejecutado: bp de 4,7 a 5,7
-LOG  Movimiento ejecutado: wk de 6,1 a 7,1
-LOG  Movimiento ejecutado: bp de 5,7 a 6,7
-LOG  Movimiento ejecutado: wk de 7,1 a 6,1
-LOG  Movimiento ejecutado: bp de 6,7 a 7,7
-LOG  Movimiento ejecutado: wk de 6,1 a 5,1
-LOG  Movimiento ejecutado: bq de 3,0 a 4,1
-LOG  Movimiento ejecutado: wk de 5,1 a 6,0
-LOG  Movimiento ejecutado: bq de 7,7 a 7,2
+const logText = ` LOG  Movimiento ejecutado: wp de 6,4 a 4,4
+ LOG  Movimiento ejecutado: bp de 1,4 a 3,4
+ LOG  Movimiento ejecutado: wp de 6,3 a 4,3
+ LOG  Movimiento ejecutado: bk de 0,4 a 1,4
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: wp de 4,3 a 3,4
+ LOG  Movimiento ejecutado: bk de 1,4 a 2,4
+ LOG  Movimiento ejecutado: wp de 6,5 a 4,5
+ LOG  Movimiento ejecutado: bk de 2,4 a 1,4
+ LOG  Movimiento ejecutado: wp de 6,2 a 4,2
+ LOG  Movimiento ejecutado: bk de 1,4 a 2,4
+ LOG  Movimiento ejecutado: wp de 4,5 a 3,5
+ LOG  Movimiento invalidado: dejaría al rey en jaque.
+ LOG  Movimiento ejecutado: bk de 2,4 a 3,4
+ LOG  Movimiento ejecutado: wq de 7,3 a 3,3
+ LOG  Movimiento ejecutado: bk de 3,4 a 2,5
+ LOG  Movimiento ejecutado: wp de 6,7 a 4,7
+ LOG  Movimiento ejecutado: bk de 2,5 a 1,4
+ LOG  Movimiento ejecutado: wq de 3,3 a 2,4
+ LOG  Movimiento ejecutado: bp de 1,5 a 2,4
+ LOG  Movimiento ejecutado: wp de 3,5 a 2,4
+ LOG  Movimiento ejecutado: bp de 1,6 a 3,6
+ LOG  Movimiento ejecutado: wp de 2,4 a 1,3
+ LOG  Movimiento ejecutado: bp de 3,6 a 4,6
+ LOG  Movimiento ejecutado: wb de 7,2 a 3,6
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bk de 1,4 a 1,3
+ LOG  Movimiento ejecutado: wp de 4,2 a 3,2
+ LOG  Movimiento ejecutado: bb de 0,5 a 3,2
+ LOG  Movimiento ejecutado: wp de 4,4 a 3,4
+ LOG  Movimiento ejecutado: bb de 3,2 a 7,6
+ LOG  Movimiento ejecutado: wr de 7,7 a 7,6
+ LOG  Movimiento ejecutado: bp de 1,7 a 3,7
+ LOG  Movimiento ejecutado: wp de 3,4 a 2,4
+ LOG  Movimiento ejecutado: bk de 1,3 a 2,4
+ LOG  Movimiento ejecutado: wk de 7,4 a 6,4
+ LOG  Movimiento ejecutado: bk de 2,4 a 3,3
+ LOG  Movimiento ejecutado: wp de 6,6 a 5,6
+ LOG  Movimiento ejecutado: bk de 3,3 a 4,2
+ LOG  Movimiento ejecutado: wb de 7,5 a 6,6
+ LOG  Movimiento ejecutado: bk de 4,2 a 4,3
+ LOG  Movimiento ejecutado: wb de 6,6 a 4,4
+ LOG  Movimiento ejecutado: bk de 4,3 a 4,2
+ LOG  Movimiento ejecutado: wb de 4,4 a 5,3
+ LOG  Movimiento ejecutado: bk de 4,2 a 3,2
+ LOG  Movimiento ejecutado: wn de 7,1 a 5,0
+ LOG  Movimiento ejecutado: bp de 1,2 a 2,2
+ LOG  Movimiento ejecutado: wp de 6,1 a 4,1
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bk de 3,2 a 4,1
+ LOG  Movimiento ejecutado: wn de 5,0 a 6,2
+ LOG  Movimiento ejecutado: bk de 4,1 a 4,0
+ LOG  Movimiento ejecutado: wb de 5,3 a 3,5
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bp de 2,2 a 3,2
+ LOG  Movimiento ejecutado: wr de 7,0 a 7,1
+ LOG  Movimiento ejecutado: bp de 3,2 a 4,2
+ LOG  Movimiento ejecutado: wr de 7,1 a 1,1
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bp de 4,2 a 5,2
+ LOG  Movimiento ejecutado: wb de 3,5 a 1,3
+ LOG  Movimiento ejecutado: bq de 0,3 a 1,3
+ LOG  Movimiento ejecutado: wb de 3,6 a 1,4
+ LOG  Movimiento ejecutado: bq de 1,3 a 7,3
+ LOG  Movimiento ejecutado: wr de 7,6 a 7,3
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bk de 4,0 a 3,0
+ LOG  Movimiento ejecutado: wn de 6,2 a 4,3
+ LOG  Movimiento ejecutado: bk de 3,0 a 2,0
+ LOG  Movimiento ejecutado: wr de 1,1 a 2,1
+ LOG  Movimiento ejecutado: bk de 2,0 a 2,1
+ LOG  Movimiento ejecutado: wn de 4,3 a 2,2
+ LOG  Movimiento ejecutado: bb de 0,2 a 3,5
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: wb de 1,4 a 3,2
+ LOG  Movimiento ejecutado: bk de 2,1 a 2,2
+ LOG  Movimiento ejecutado: wr de 7,3 a 1,3
+ LOG  Movimiento ejecutado: bk de 2,2 a 3,1
+ LOG  Movimiento ejecutado: wp de 6,0 a 4,0
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bk de 3,1 a 2,0
+ LOG  Movimiento ejecutado: wb de 3,2 a 2,1
+ LOG  Movimiento ejecutado: bn de 0,1 a 2,2
+ LOG  Movimiento ejecutado: wr de 1,3 a 0,3
+ LOG  Movimiento ejecutado: bn de 2,2 a 1,4
+ LOG  Movimiento ejecutado: wr de 0,3 a 0,0
+ LOG  Movimiento ejecutado: bk de 2,0 a 1,1
+ LOG  Movimiento ejecutado: wb de 2,1 a 1,0
+ LOG  Movimiento ejecutado: bk de 1,1 a 2,0
+ LOG  Movimiento ejecutado: wr de 0,0 a 0,1
+ LOG  Movimiento ejecutado: bk de 2,0 a 3,0
+ LOG  Movimiento ejecutado: wr de 0,1 a 3,1
+ LOG  Movimiento ejecutado: bk de 3,0 a 4,0
+ LOG  Movimiento ejecutado: wb de 1,0 a 3,2
+ LOG  Movimiento ejecutado: bk de 4,0 a 3,1
+ LOG  Movimiento ejecutado: wb de 3,2 a 1,4
+ LOG  Movimiento ejecutado: bk de 3,1 a 4,2
+ LOG  Movimiento ejecutado: wb de 1,4 a 2,5
+ LOG  Movimiento ejecutado: bn de 0,6 a 2,5
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: wk de 6,4 a 7,3
+ LOG  Movimiento ejecutado: bp de 5,2 a 6,2
+ LOG  Movimiento ejecutado: wk de 7,3 a 6,3
+ LOG  Movimiento ejecutado: bp de 6,2 a 7,2
+ LOG  Movimiento ejecutado: wk de 6,3 a 7,2
+ LOG  Movimiento ejecutado: bb de 3,5 a 2,6
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: wk de 7,2 a 6,1
+ LOG  Movimiento ejecutado: bb de 2,6 a 7,1
+ LOG  Movimiento ejecutado: wk de 6,1 a 7,0
+ LOG  Movimiento ejecutado: br de 0,7 a 0,0
+ LOG  Movimiento ejecutado: wk de 7,0 a 7,1
+ LOG  Movimiento ejecutado: bk de 4,2 a 5,1
+ LOG  Movimiento ejecutado: wk de 7,1 a 7,2
+ LOG  Movimiento ejecutado: bn de 2,5 a 4,4
+ LOG  Movimiento ejecutado: wk de 7,2 a 7,3
+ LOG  Movimiento ejecutado: bn de 4,4 a 6,3
+ LOG  Movimiento ejecutado: wk de 7,3 a 6,3
+ LOG  Movimiento ejecutado: bk de 5,1 a 6,1
+ LOG  Movimiento ejecutado: wk de 6,3 a 7,3
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: br de 0,0 a 7,0
+ LOG  Movimiento ejecutado: wk de 7,3 a 6,3
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: bk de 6,1 a 7,1
+ LOG  Movimiento ejecutado: wk de 6,3 a 5,4
+ LOG  Movimiento ejecutado: br de 7,0 a 5,0
+ LOG  Movimiento ejecutado: wk de 5,4 a 4,5
+ LOG  Movimiento ILEGAL según las reglas de la pieza.
+ LOG  Movimiento ejecutado: br de 5,0 a 5,4
+ LOG  Movimiento ejecutado: wk de 4,5 a 3,6
+ LOG  Movimiento ejecutado: br de 5,4 a 5,6
+ LOG  Movimiento ejecutado: wk de 3,6 a 3,7
+ LOG  Movimiento ejecutado: bk de 7,1 a 6,2
+ LOG  Movimiento ejecutado: wk de 3,7 a 3,6
+ LOG  Movimiento ejecutado: br de 5,6 a 5,7
+ LOG  Movimiento ejecutado: wp de 4,7 a 3,7
+ LOG  Movimiento ejecutado: br de 5,7 a 4,7
+ LOG  Movimiento deshecho: br vuelto a 5,7
+ LOG  Movimiento ejecutado: br de 5,7 a 3,7
+ LOG  Movimiento ejecutado: wk de 3,6 a 3,7
+ LOG  Movimiento ejecutado: bk de 6,2 a 5,3
+ LOG  Movimiento ejecutado: wk de 3,7 a 4,6
+ LOG  Movimiento ejecutado: bk de 5,3 a 4,4
+ LOG  Movimiento ejecutado: wk de 4,6 a 5,6
+ LOG  Movimiento ejecutado: bk de 4,4 a 3,3
+ LOG  Movimiento ejecutado: wk de 5,6 a 4,5
 `;
 
 function applyMoves(board, moves) {
+  const history = []; // historial de movimientos aplicados para soportar undo
   for (const m of moves) {
-    const { from, to } = m;
-    // move without validation
-    const piece = board[from.row][from.col];
-    board[to.row][to.col] = piece;
-    board[from.row][from.col] = null;
+    if (m.type === 'move') {
+      const { from, to } = m;
+      // move without validation, pero registrar lo anterior
+      const piece = board[from.row][from.col];
+      const captured = board[to.row][to.col];
+      history.push({ from, to, piece: piece ? { ...piece } : null, captured: captured ? { ...captured } : null });
+      board[to.row][to.col] = piece;
+      board[from.row][from.col] = null;
+    } else if (m.type === 'undo') {
+      // revertir el último movimiento aplicado
+      const last = history.pop();
+      if (!last) {
+        console.log('Advertencia: intento de deshacer pero no hay historial');
+        continue;
+      }
+      // Restaurar pieza movida a su origen
+      board[last.from.row][last.from.col] = last.piece;
+      // Restaurar pieza capturada (si la hubo)
+      board[last.to.row][last.to.col] = last.captured || null;
+    }
   }
 }
 
@@ -306,27 +346,17 @@ function main(){
   const board = makeBoard();
   const moves = parseMoves(logText);
   applyMoves(board, moves);
-  console.log('Applied', moves.length, 'moves');
+  console.log('Movimientos aplicados:', moves.length);
   printBoard(board);
 
   const whiteKing = findKing(board,'w');
   const blackKing = findKing(board,'b');
-  console.log('White king', whiteKing);
-  console.log('Black king', blackKing);
+  console.log('Rey blanco', whiteKing);
+  console.log('Rey negro', blackKing);
 
-  console.log('Is white king in check?', isSquareAttacked(board, whiteKing, 'b'));
-  console.log('Is black king in check?', isSquareAttacked(board, blackKing, 'w'));
+  console.log('¿Rey blanco en jaque?', isSquareAttacked(board, whiteKing, 'b'));
+  console.log('¿Rey negro en jaque?', isSquareAttacked(board, blackKing, 'w'));
 
-  // Check right-square from white king
-  if (whiteKing) {
-    const right = { row: whiteKing.row, col: whiteKing.col + 1 };
-    if (inBounds(right.row,right.col)){
-      const attackers = getAttackersOfSquare(board, right, 'b');
-      console.log('Square to the right of white king', right, 'is attacked by', attackers.length, 'pieces:', attackers);
-    } else {
-      console.log('Right square out of bounds');
-    }
-  }
 }
 
 main();
