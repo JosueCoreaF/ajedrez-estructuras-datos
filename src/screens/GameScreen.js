@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image } from 'react-native';
 import Board from '../components/Board';
-import { ChessEngine } from '../engine/ChessEngine';
+import { MotorAjedrez } from '../engine/ChessEngine';
 import PIECE_IMAGES from '../components/icons';
 import { TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -18,36 +18,36 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		const [lastMove, setLastMove] = useState(null);
 
 	useEffect(() => {
-		// Inicializar el motor y cargar el tablero inicial
-		engineRef.current = new ChessEngine();
-		setBoard(engineRef.current.getBoard());
+	// Inicializar el motor y cargar el tablero inicial
+	engineRef.current = new MotorAjedrez();
+	setBoard(engineRef.current.obtenerTablero());
 		// Si entramos en modo replay, reiniciamos el motor y cargamos el tablero inicial
 		if (mode === 'replay' && replayLog) {
 			// prepare engine for replay (animado si el usuario lanza reproducir)
-			engineRef.current = new ChessEngine();
-			setBoard(engineRef.current.getBoard());
+			engineRef.current = new MotorAjedrez();
+			setBoard(engineRef.current.obtenerTablero());
 		}
 
 		// Si entramos en modo resume, aplicar inmediatamente los movimientos guardados
 		if (mode === 'resume' && replayLog) {
-			engineRef.current = new ChessEngine();
+			engineRef.current = new MotorAjedrez();
 			const moves = parseMovesFromLog(replayLog);
 			for (const m of moves) {
-				// Intentar aplicar con el motor para mantener moveHistory y estado consistente
-				const ok = engineRef.current.movePiece(m.from, m.to);
+				// Intentar aplicar con el motor para mantener historialMovimientos y estado consistente
+				const ok = engineRef.current.moverPieza(m.from, m.to);
 				if (!ok) {
 					// Si por alguna razón el motor rechaza (log externo), aplicamos el movimiento directo
 					const piece = engineRef.current.board[m.from.row][m.from.col];
 					engineRef.current.board[m.to.row][m.to.col] = piece;
 					engineRef.current.board[m.from.row][m.from.col] = null;
-					// NOTA: en este fallback no se registra moveHistory correctamente, pero los logs guardados
-					// que generó nuestra app deberían ser aplicables por movePiece.
+					// NOTA: en este fallback no se registra historialMovimientos correctamente, pero los logs guardados
+					// que generó nuestra app deberían ser aplicables por moverPieza.
 				}
 			}
-			setBoard(engineRef.current.getBoard());
+			setBoard(engineRef.current.obtenerTablero());
 			// ajustar lastMove al último movimiento aplicado
-			if (engineRef.current.moveHistory.length) {
-				const lm = engineRef.current.moveHistory[engineRef.current.moveHistory.length - 1];
+			if (engineRef.current.historialMovimientos.length) {
+				const lm = engineRef.current.historialMovimientos[engineRef.current.historialMovimientos.length - 1];
 				setLastMove({ from: lm.from, to: lm.to });
 			}
 			// guardar metadata de la partida cargada para permitir actualizarla
@@ -64,7 +64,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	function buildLogFromHistory() {
 		if (!engineRef.current) return '';
 		const header = `Partida iniciada: ${new Date().toISOString()}`;
-		const lines = (engineRef.current.moveHistory || []).map(m => {
+	const lines = (engineRef.current.historialMovimientos || []).map(m => {
 			const pieceId = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
 			return `Movimiento ejecutado: ${pieceId} de ${m.from.row},${m.from.col} a ${m.to.row},${m.to.col}`;
 		});
@@ -81,7 +81,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				winner: winnerColor,
 				winnerName,
 				endedAt: new Date().toISOString(),
-				movesCount: engineRef.current ? (engineRef.current.moveHistory || []).length : 0,
+				movesCount: engineRef.current ? (engineRef.current.historialMovimientos || []).length : 0,
 				log_text: finalLog
 			};
 			// Guardar en historial
@@ -169,20 +169,21 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		setReplayMoves(moves);
 		setIsPlaying(true);
 		// reset engine
-		engineRef.current = new ChessEngine();
-		setBoard(engineRef.current.getBoard());
+		// reset engine
+		engineRef.current = new MotorAjedrez();
+		setBoard(engineRef.current.obtenerTablero());
 		for (let i = 0; i < moves.length; i++) {
 			if (!isPlaying) break;
 			const m = moves[i];
 			// intentar mover con el engine (valida reglas)
-			const ok = engineRef.current.movePiece(m.from, m.to);
+			const ok = engineRef.current.moverPieza(m.from, m.to);
 			if (!ok) {
 				// si falla, aplicar directamente (fallback)
 				const piece = engineRef.current.board[m.from.row][m.from.col];
 				engineRef.current.board[m.to.row][m.to.col] = piece;
 				engineRef.current.board[m.from.row][m.from.col] = null;
 			}
-			setBoard(engineRef.current.getBoard());
+			setBoard(engineRef.current.obtenerTablero());
 			setLastMove({ from: m.from, to: m.to });
 			await new Promise(res => setTimeout(res, speed));
 		}
@@ -206,16 +207,16 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			}
 
 					// La pieza ahora es un objeto { type, color }
-					const pieceColor = piece.color;
-			const currentTurn = engineRef.current.currentTurn || 'w';
-			if (pieceColor !== currentTurn) {
+	    const pieceColor = piece.color;
+    const turnoActual = engineRef.current.turnoActual || 'w';
+	    if (pieceColor !== turnoActual) {
 				setStatus("No es el turno de esa pieza");
 				return;
 			}
 
 			setSelected({ row, col });
 					// Calcular movimientos posibles y resaltar
-					const possible = engineRef.current.generateMoves({ row, col });
+					const possible = engineRef.current.generarMovimientos({ row, col });
 					setHighlights(possible);
 			setStatus('Pieza seleccionada');
 			return;
@@ -232,9 +233,9 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 
 		// Si hay selección y el usuario tocó una pieza propia, cambiar selección en vez de intentar mover
-		if (piece && piece.color === engineRef.current.currentTurn) {
+		if (piece && piece.color === engineRef.current.turnoActual) {
 			setSelected({ row, col });
-			const possible = engineRef.current.generateMoves({ row, col });
+			const possible = engineRef.current.generarMovimientos({ row, col });
 			setHighlights(possible);
 			setAttackers([]);
 			setStatus('Pieza seleccionada');
@@ -242,28 +243,28 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 
 		// Intentar mover desde selected -> {row,col}
-		const moved = engineRef.current.movePiece(selected, { row, col });
+		const moved = engineRef.current.moverPieza(selected, { row, col });
 		if (moved) {
-			setBoard(engineRef.current.getBoard());
+			setBoard(engineRef.current.obtenerTablero());
 			setSelected(null);
 			setHighlights([]);
 			setLastMove({ from: selected, to: { row, col } });
 
 			// Comprobar empate por solo reyes
-			if (engineRef.current.isOnlyKingsLeft && engineRef.current.isOnlyKingsLeft()) {
+			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
 				setAttackers([]);
 				setGameOver(true);
 				return;
 			}
 			// Después del movimiento, comprobar jaque / jaque mate para el oponente
-			const opponent = engineRef.current.currentTurn; // ya fue cambiado en movePiece
+			const opponent = engineRef.current.turnoActual; // ya fue cambiado en moverPieza
 			// Nota: el motor no elimina al rey ni debe permitir capturarlo.
 			// Confiamos en la detección de jaque mate para terminar la partida.
-			if (engineRef.current.isKingInCheck(opponent)) {
-				const attackersList = engineRef.current.getAttackersOfKing(opponent);
+			if (engineRef.current.estaReyEnJaque(opponent)) {
+				const attackersList = engineRef.current.obtenerAtacantesDelRey(opponent);
 				setAttackers(attackersList);
-				if (engineRef.current.isCheckmate(opponent)) {
+				if (engineRef.current.esJaqueMate(opponent)) {
 					// El oponente está en jaque mate -> el jugador que movió ha ganado
 					const winner = opponent === 'w' ? 'b' : 'w';
 					setStatus('Jaque mate');
@@ -282,7 +283,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			const eng = engineRef.current;
 			let movingPiece = null;
 			if (eng && eng.board && selected) movingPiece = eng.board[selected.row][selected.col];
-			const wouldBeInCheck = eng && typeof eng._wouldBeInCheckAfterMove === 'function' && eng._wouldBeInCheckAfterMove(selected, { row, col });
+			const wouldBeInCheck = eng && typeof eng._estariaEnJaqueTrasMovimiento === 'function' && eng._estariaEnJaqueTrasMovimiento(selected, { row, col });
 			if (wouldBeInCheck) {
 				// Simular el movimiento para calcular atacantes; si movemos el rey,
 				// interesa quién ataca la casilla destino; si movemos otra pieza,
@@ -298,11 +299,11 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				if (movingPiece && movingPiece.type === 'k') {
 					// Si es el rey el que se mueve: atacantes sobre la casilla destino
 					const opponent = movingPiece.color === 'w' ? 'b' : 'w';
-					attackersList = eng.getAttackersOfSquare(to, opponent) || [];
+					attackersList = eng.obtenerAtacantesDeCasilla(to, opponent) || [];
 					setStatus(`Movimiento inválido: la casilla estaría atacada por ${attackersList.length} pieza(s)`);
 				} else {
 					// Si es otra pieza: calculamos atacantes del rey después del movimiento
-					const kingAttackers = eng.getAttackersOfKing(movingPiece.color) || [];
+					const kingAttackers = eng.obtenerAtacantesDelRey(movingPiece.color) || [];
 					attackersList = kingAttackers;
 					setStatus(`Movimiento inválido: dejaría a tu rey en jaque por ${attackersList.length} pieza(s)`);
 				}
@@ -318,8 +319,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	};
 
 	const restartGame = () => {
-		engineRef.current = new ChessEngine();
-		setBoard(engineRef.current.getBoard());
+		engineRef.current = new MotorAjedrez();
+		setBoard(engineRef.current.obtenerTablero());
 		// Limpiar todo el estado visual para evitar marcas residuales
 		setSelected(null);
 		setHighlights([]);
@@ -331,17 +332,17 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 
 	const undoLastMove = () => {
 		if (!engineRef.current) return;
-		const undone = engineRef.current.undoMove();
+		const undone = engineRef.current.deshacerMovimiento();
 		if (undone) {
 			// Actualizar tablero y limpiar resaltados
-			setBoard(engineRef.current.getBoard());
+			setBoard(engineRef.current.obtenerTablero());
 			setSelected(null);
 			setHighlights([]);
 			setAttackers([]);
 			setGameOver(false);
 			setStatus('Movimiento deshecho');
 			// Actualizar lastMove al movimiento anterior en el historial (o null si no hay)
-			const mh = engineRef.current.moveHistory;
+			const mh = engineRef.current.historialMovimientos;
 			if (mh && mh.length) {
 				const lm = mh[mh.length - 1];
 				setLastMove({ from: lm.from, to: lm.to });
@@ -350,7 +351,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			}
 
 			// Comprobar empate por solo reyes tras deshacer
-			if (engineRef.current.isOnlyKingsLeft && engineRef.current.isOnlyKingsLeft()) {
+			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
 				setGameOver(true);
 			} else {
@@ -387,7 +388,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				<View style={styles.captureColumn}>
 					<Text style={styles.captureLabel}>Capturadas (negras)</Text>
 					<View style={styles.captureList}>
-						{engineRef.current && engineRef.current.getCapturedPieces().b.map((p, i) => {
+						{engineRef.current && engineRef.current.obtenerPiezasCapturadas().b.map((p, i) => {
 							const key = `${p.color}${p.type}`;
 							const src = PIECE_IMAGES[key];
 							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
@@ -399,7 +400,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				<View style={styles.captureColumn}>
 					<Text style={styles.captureLabel}>Capturadas (blancas)</Text>
 					<View style={styles.captureList}>
-						{engineRef.current && engineRef.current.getCapturedPieces().w.map((p, i) => {
+						{engineRef.current && engineRef.current.obtenerPiezasCapturadas().w.map((p, i) => {
 							const key = `${p.color}${p.type}`;
 							const src = PIECE_IMAGES[key];
 							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
@@ -450,7 +451,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			<View style={styles.historyContainer}>
 				<Text style={styles.historyTitle}>Historial</Text>
 				<ScrollView style={styles.historyList}>
-					{engineRef.current && engineRef.current.moveHistory.map((m, idx) => {
+					{engineRef.current && engineRef.current.historialMovimientos.map((m, idx) => {
 						const pc = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
 						return (
 							<View key={idx} style={styles.historyItem}>

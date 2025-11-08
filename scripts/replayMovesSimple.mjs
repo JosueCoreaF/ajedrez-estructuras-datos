@@ -1,7 +1,7 @@
 // Simple replay script that doesn't import project modules. Reconstructs board by applying executed moves
 
 const INITIAL_BOARD = [
-  ['r','n','b','q','k','b','n','r'],
+  ['r','n','b','k','q','b','n','r'],
   ['p','p','p','p','p','p','p','p'],
   [null,null,null,null,null,null,null,null],
   [null,null,null,null,null,null,null,null],
@@ -242,7 +242,7 @@ function findKing(board, color) {
 
 function inBounds(r,c){ return r>=0 && r<8 && c>=0 && c<8 }
 
-function isSquareAttacked(board, square, byColor) {
+function casillaEstaAtacada(board, square, byColor) {
   // check for pawn attacks
   const dir = byColor === 'w' ? -1 : 1; // pawns attack forward by color
   const r = square.row, c = square.col;
@@ -293,13 +293,13 @@ function isSquareAttacked(board, square, byColor) {
   return false;
 }
 
-function getAttackersOfSquare(board, square, byColor) {
+function obtenerAtacantesDeCasilla(board, square, byColor) {
   const attackers = [];
   for (let r=0;r<8;r++) for (let c=0;c<8;c++){
     const p = board[r][c];
     if (!p || p.color!==byColor) continue;
-    // test p reaches square using same logic as isSquareAttacked but from p's pos
-    // reuse isSquareAttacked by temporarily moving p? Simpler: check by type
+  // comprobar si p alcanza la casilla usando la misma lógica que casillaEstaAtacada pero desde la pos de p
+  // reutilizar casillaEstaAtacada moviendo temporalmente p? Más simple: comprobar por tipo
     const dr = square.row - r, dc = square.col - c;
     if (p.type==='p') {
       const dir = p.color === 'w' ? -1 : 1;
@@ -354,8 +354,8 @@ function main(){
   console.log('Rey blanco', whiteKing);
   console.log('Rey negro', blackKing);
 
-  console.log('¿Rey blanco en jaque?', isSquareAttacked(board, whiteKing, 'b'));
-  console.log('¿Rey negro en jaque?', isSquareAttacked(board, blackKing, 'w'));
+  console.log('¿Rey blanco en jaque?', casillaEstaAtacada(board, whiteKing, 'b'));
+  console.log('¿Rey negro en jaque?', casillaEstaAtacada(board, blackKing, 'w'));
 
 }
 
