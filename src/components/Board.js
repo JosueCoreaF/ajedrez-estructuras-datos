@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, useWindowDimensions } from 'react-native';
 import PIECE_IMAGES from './icons';
 
 /**
@@ -8,8 +8,19 @@ import PIECE_IMAGES from './icons';
  * - board: 8x8 matrix with piece symbols or null
  * - onSquarePress: function({ row, col })
  */
-export default function Board({ board = [], onSquarePress = () => {}, selected = null, highlights = [], attackers = [], lastMove = null }) {
+export default function Board({ board = [], onSquarePress = () => {}, selected = null, highlights = [], attackers = [], lastMove = null, flipped = false }) {
   const overlayAnim = useRef(new Animated.Value(0)).current;
+  const moveAnim = useRef(new Animated.Value(0)).current;
+
+  // Responsive board sizing: use full available window dimensions and reserve space
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const MAX_BOARD = Math.min(720, Math.max(windowWidth, windowHeight));
+  const SIDE_MARGIN = 140; // espacio estimado para paneles y paddings
+  const VERTICAL_MARGIN = 260; // estimado para encabezado, controles y historial
+  const availWidth = Math.max(240, windowWidth - SIDE_MARGIN);
+  const availHeight = Math.max(240, windowHeight - VERTICAL_MARGIN);
+  const boardSize = Math.min(MAX_BOARD, availWidth, availHeight);
+  const squareSize = boardSize / 8;
 
   useEffect(() => {
     // Animar aparición de resaltados cuando cambian
@@ -20,25 +31,37 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
       useNativeDriver: true,
     }).start();
   }, [highlights]);
+
+  useEffect(() => {
+    if (lastMove && lastMove.to) {
+      // Animate the moved piece: rotateY 0 -> 180deg
+      moveAnim.setValue(0);
+      Animated.timing(moveAnim, {
+        toValue: 1,
+        duration: 480,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [lastMove]);
   // Helper to render a single square
   const renderSquare = (piece, row, col) => {
     const isLight = (row + col) % 2 === 0;
     const backgroundColor = isLight ? styles.lightSquare.backgroundColor : styles.darkSquare.backgroundColor;
-  const pieceKey = piece ? `${piece.color}${piece.type}` : null;
-  const pieceImage = pieceKey ? PIECE_IMAGES[pieceKey] : null;
-  const isSelected = selected && selected.row === row && selected.col === col;
-  const hl = highlights.find(h => h.row === row && h.col === col);
-  const isHighlighted = !!hl;
-  const isAttacker = attackers.some(a => a.row === row && a.col === col);
-  const isLastMoveFrom = lastMove && lastMove.from && lastMove.from.row === row && lastMove.from.col === col;
-  const isLastMoveTo = lastMove && lastMove.to && lastMove.to.row === row && lastMove.to.col === col;
+    const pieceKey = piece ? `${piece.color}${piece.type}` : null;
+    const pieceImage = pieceKey ? PIECE_IMAGES[pieceKey] : null;
+    const isSelected = selected && selected.row === row && selected.col === col;
+    const hl = highlights.find(h => h.row === row && h.col === col);
+    const isHighlighted = !!hl;
+    const isAttacker = attackers.some(a => a.row === row && a.col === col);
+    const isLastMoveFrom = lastMove && lastMove.from && lastMove.from.row === row && lastMove.from.col === col;
+    const isLastMoveTo = lastMove && lastMove.to && lastMove.to.row === row && lastMove.to.col === col;
 
     return (
       <TouchableOpacity
         key={`${row}-${col}`}
         style={[
           styles.square,
-          { backgroundColor },
+          { backgroundColor, width: squareSize, height: squareSize },
           isSelected && styles.selected,
           isAttacker && styles.attacker,
           isLastMoveFrom && styles.lastMoveFrom,
@@ -48,9 +71,18 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
         activeOpacity={0.8}
       >
         {pieceImage ? (
-          <Image source={pieceImage} style={styles.pieceImage} resizeMode="contain" />
+          (() => {
+            const isMovedDest = lastMove && lastMove.to && lastMove.to.row === row && lastMove.to.col === col;
+            const AniImage = Animated.createAnimatedComponent(Image);
+            const rotate = moveAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+            const imgStyle = [{ width: squareSize * 0.78, height: squareSize * 0.78 }];
+            if (isMovedDest) {
+              imgStyle.push({ transform: [{ perspective: 800 }, { rotateY: rotate }] });
+            }
+            return <AniImage source={pieceImage} style={imgStyle} resizeMode="contain" />;
+          })()
         ) : (
-          <Text style={styles.pieceText}>{piece ? (piece.color + piece.type) : ''}</Text>
+          <Text style={[styles.pieceText, { fontSize: Math.max(12, squareSize * 0.32) }]}>{piece ? (piece.color + piece.type) : ''}</Text>
         )}
 
         {/* Overlay para resaltar movimientos (detrás de badges/indicadores) */}
@@ -64,23 +96,83 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
           />
         )}
 
-        {/* (badge removed) attackers are indicated by the attacker border style */}
+        {/* attackers indicated by border styles */}
       </TouchableOpacity>
     );
   };
 
   return (
-    <View style={styles.board}>
-      {board.map((rowArr, row) => (
-        <View key={`r-${row}`} style={styles.row}>
-          {rowArr.map((piece, col) => renderSquare(piece, row, col))}
+    <View style={styles.boardWrapper}>
+      {/* Top file labels */}
+      <View style={{ alignItems: 'center', marginBottom: 4 }}>
+        <View style={{ width: boardSize + 48, alignItems: 'center' }}>
+          <View style={{ width: boardSize, flexDirection: 'row' }}>
+                {(flipped ? ['H','G','F','E','D','C','B','A'] : ['A','B','C','D','E','F','G','H']).map((f, idx) => (
+                  <View key={`file-top-${idx}`} style={{ width: squareSize, alignItems: 'center' }}>
+                    <Text style={styles.fileLabelText}>{f}</Text>
+                  </View>
+                ))}
+          </View>
         </View>
-      ))}
+      </View>
+
+      {/* Board with rank labels */}
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        {/* Left ranks */}
+        <View style={{ width: 28 }}>
+          {(flipped ? ([...Array(8)].map((_,i)=> i+1)) : ([...Array(8)].map((_,i)=> 8-i))).map((rLabel, i) => (
+            <View key={`rank-l-${i}`} style={{ width: 28, height: squareSize, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={styles.rankLabelText}>{rLabel}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Board */}
+        <View style={{ width: boardSize, height: boardSize, borderWidth: 2, borderColor: '#333' }}>
+          {(flipped ? [...board].slice().reverse() : board).map((rowArr, displayRowIdx) => {
+            return (
+              <View key={`r-${displayRowIdx}`} style={{ flexDirection: 'row' }}>
+                {(flipped ? [...rowArr].slice().reverse() : rowArr).map((piece, displayColIdx) => {
+                  // Map displayed coordinates to actual board coordinates
+                  const actualRow = flipped ? (7 - displayRowIdx) : displayRowIdx;
+                  const actualCol = flipped ? (7 - displayColIdx) : displayColIdx;
+                  return renderSquare(piece, actualRow, actualCol);
+                })}
+              </View>
+            );
+          })}
+        </View>
+
+        {/* Right ranks */}
+        <View style={{ width: 28 }}>
+          {(flipped ? ([...Array(8)].map((_,i)=> i+1)) : ([...Array(8)].map((_,i)=> 8-i))).map((rLabel, i) => (
+            <View key={`rank-r-${i}`} style={{ width: 28, height: squareSize, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={styles.rankLabelText}>{rLabel}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Bottom file labels */}
+      <View style={{ alignItems: 'center', marginTop: 4 }}>
+        <View style={{ width: boardSize + 48, alignItems: 'center' }}>
+          <View style={{ width: boardSize, flexDirection: 'row' }}>
+              {(flipped ? ['H','G','F','E','D','C','B','A'] : ['A','B','C','D','E','F','G','H']).map((f, idx) => (
+                <View key={`file-b-${idx}`} style={{ width: squareSize, alignItems: 'center' }}>
+                  <Text style={styles.fileLabelText}>{f}</Text>
+                </View>
+              ))}
+            </View>
+        </View>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  boardWrapper: {
+    alignItems: 'center',
+  },
   board: {
     width: 320,
     height: 320,
@@ -88,7 +180,7 @@ const styles = StyleSheet.create({
     borderColor: '#333',
   },
   row: {
-    flex: 1,
+    height: 40,
     flexDirection: 'row',
   },
   square: {
@@ -109,6 +201,9 @@ const styles = StyleSheet.create({
   pieceImage: {
     width: '70%',
     height: '70%',
+  },
+  pieceFlipped: {
+    transform: [{ rotate: '180deg' }],
   },
   highlight: {
     borderWidth: 3,
@@ -138,5 +233,37 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderRadius: 4,
+  },
+  fileLabelsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  filesContainer: {
+    flexDirection: 'row',
+  },
+  fileLabelCell: {
+    width: 40,
+    alignItems: 'center',
+  },
+  fileLabelText: {
+    fontWeight: '700',
+  },
+  cornerLabel: {
+    width: 24,
+  },
+  boardRowWithRanks: {
+    flexDirection: 'column',
+  },
+  rowWithRank: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  rankLabel: {
+    width: 24,
+    alignItems: 'center',
+  },
+  rankLabelText: {
+    fontWeight: '700',
   },
 });

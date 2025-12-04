@@ -65,10 +65,104 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		if (!engineRef.current) return '';
 		const header = `Partida iniciada: ${new Date().toISOString()}`;
 	const lines = (engineRef.current.historialMovimientos || []).map(m => {
-			const pieceId = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
+			const tipo = m.piece && m.piece.type ? tipoPiezaEsp(m.piece.type) : '??';
+			const pieceId = m.piece && m.piece.type ? `${m.piece.color}${tipo}` : '??';
 			return `Movimiento ejecutado: ${pieceId} de ${m.from.row},${m.from.col} a ${m.to.row},${m.to.col}`;
 		});
 		return [header].concat(lines).join('\n');
+	}
+
+	// --- Notación algebraica (español) para historial ---
+	function squareToAlgebraic({ row, col }) {
+		if (row == null || col == null) return '??';
+		const file = String.fromCharCode(97 + col); // a..h
+		const rank = 8 - row; // row 0 -> 8
+		return `${file}${rank}`;
+	}
+
+	function moveToSAN(move, engineInstance) {
+		if (!move || !move.piece) return '??';
+		const color = move.piece.color;
+		const type = (move.piece.type || 'p').toLowerCase();
+		// Detect castling by king moving two cols
+		if (type === 'k' && Math.abs(move.from.col - move.to.col) === 2) {
+			return move.to.col > move.from.col ? 'O-O' : 'O-O-O';
+		}
+		const dest = squareToAlgebraic(move.to);
+		const isCapture = !!(move.capturedPiece || move.capture);
+		const promo = move.special && move.special.promoted ? '=' + tipoPiezaEsp(move.special.promotedTo || 'q') : '';
+
+		// Piece letter in Spanish (empty for pawns)
+		const pieceLetter = type === 'p' ? '' : tipoPiezaEsp(type);
+
+		// Disambiguation: check if other same-type pieces of same color can also reach dest
+		let disamb = '';
+		if (type !== 'p') {
+			const board = engineInstance.obtenerTablero();
+			const candidates = [];
+			for (let r = 0; r < 8; r++) {
+				for (let c = 0; c < 8; c++) {
+					const p = board[r][c];
+					if (p && p.type && p.type.toLowerCase() === type && p.color === color) {
+						// skip the moving piece origin
+						if (r === move.from.row && c === move.from.col) continue;
+						// generate moves for this piece and see if it can reach dest
+						const moves = engineInstance.generarMovimientos({ row: r, col: c }) || [];
+						if (moves.find(m => m.row === move.to.row && m.col === move.to.col)) {
+							candidates.push({ row: r, col: c });
+						}
+					}
+				}
+			}
+			if (candidates.length > 0) {
+				// If multiple, include file or rank as needed. Prefer file if files differ.
+				const sameFile = candidates.every(x => x.col === move.from.col);
+				const sameRank = candidates.every(x => x.row === move.from.row);
+				if (!sameFile) disamb = String.fromCharCode(97 + move.from.col);
+				else if (!sameRank) disamb = String(8 - move.from.row);
+				else disamb = String.fromCharCode(97 + move.from.col);
+			}
+		}
+
+		// Pawn captures include file of origin (exd5)
+		if (type === 'p') {
+			if (isCapture) {
+				const fromFile = String.fromCharCode(97 + move.from.col);
+				return `${fromFile}x${dest}${promo}`;
+			}
+			return `${dest}${promo}`;
+		}
+
+		const capMark = isCapture ? 'x' : '';
+		return `${pieceLetter}${disamb}${capMark}${dest}${promo}`;
+	}
+
+	function buildAlgebraicPairs() {
+		const hist = engineRef.current ? (engineRef.current.historialMovimientos || []) : [];
+		const tempEngine = new MotorAjedrez();
+		const pairs = [];
+		for (let i = 0; i < hist.length; i++) {
+			const mv = hist[i];
+			// Use tempEngine in current state to compute SAN for this move
+			const san = moveToSAN(mv, tempEngine);
+			// determine piece key for icon (e.g., 'wp','bq')
+			const pieceKey = mv.piece && mv.piece.type ? `${mv.piece.color}${mv.piece.type}` : null;
+			// apply the move on tempEngine to keep it in sync
+			const ok = tempEngine.moverPieza(mv.from, mv.to);
+			if (!ok) {
+				// fallback: apply raw
+				const piece = tempEngine.board[mv.from.row][mv.from.col];
+				tempEngine.board[mv.to.row][mv.to.col] = piece;
+				tempEngine.board[mv.from.row][mv.from.col] = null;
+			}
+			if (i % 2 === 0) {
+				pairs.push({ no: Math.floor(i / 2) + 1, white: san, whitePiece: pieceKey, black: '', blackPiece: null });
+			} else {
+				pairs[pairs.length - 1].black = san;
+				pairs[pairs.length - 1].blackPiece = pieceKey;
+			}
+		}
+		return pairs;
 	}
 
 	async function finalizeMatch(winnerColor) {
@@ -150,6 +244,24 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	// --- Replayer state ---
 	const [replayMoves, setReplayMoves] = useState([]);
 	const [isPlaying, setIsPlaying] = useState(false);
+	const [menuVisible, setMenuVisible] = useState(false);
+	const [historyModalVisible, setHistoryModalVisible] = useState(false);
+	const [actionsModalVisible, setActionsModalVisible] = useState(false);
+	const [flipBoard, setFlipBoard] = useState(false);
+	const [autoRotateEnabled, setAutoRotateEnabled] = useState(true);
+
+	function tipoPiezaEsp(type) {
+		if (!type) return '';
+		switch (type.toLowerCase()) {
+			case 'k': return 'R'; // Rey
+			case 'q': return 'D'; // Dama
+			case 'r': return 'T'; // Torre
+			case 'b': return 'A'; // Alfil
+			case 'n': return 'C'; // Caballo
+			case 'p': return 'p'; // Peón
+			default: return type.toUpperCase();
+		}
+	}
 
 	function parseMovesFromLog(logText) {
 		const lines = String(logText).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -250,6 +362,12 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			setHighlights([]);
 			setLastMove({ from: selected, to: { row, col } });
 
+			// Si estamos en modo local (pass-and-play) y la rotación automática está activada,
+			// girar la vista tras cada movimiento
+			if (mode === 'local' && autoRotateEnabled) {
+				setFlipBoard(s => !s);
+			}
+
 			// Comprobar empate por solo reyes
 			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
@@ -328,6 +446,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		setLastMove(null);
 		setGameOver(false);
 		setStatus('');
+		// Restaurar orientación por defecto (blancas abajo)
+		setFlipBoard(false);
 	};
 
 	const undoLastMove = () => {
@@ -357,6 +477,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			} else {
 				setGameOver(false);
 			}
+
+			// Si estamos en modo local (pass-and-play) y la rotación automática está activada,
+			// al deshacer también rotamos la vista para mantener la orientación correcta
+			if (mode === 'local' && autoRotateEnabled) setFlipBoard(s => !s);
 		} else {
 			setStatus('No hay movimientos para deshacer');
 		}
@@ -364,7 +488,6 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 
 	return (
 		<View style={styles.container}>
-			<Text style={styles.title}>Ajedrez — Tablero</Text>
 
 			{mode === 'replay' && savedName ? <Text style={{ fontWeight: '600', marginBottom: 8 }}>Reproduciendo: {savedName}</Text> : null}
 			{mode === 'replay' && replayLog ? (
@@ -372,64 +495,91 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 					<TouchableOpacity style={styles.ctrlBtn} onPress={() => { if (!isPlaying) playReplay(replayLog); }}>
 						<Text style={styles.ctrlText}>{isPlaying ? 'Reproduciendo...' : 'Reproducir'}</Text>
 					</TouchableOpacity>
-					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#999' }]} onPress={() => { setIsPlaying(false); }}>
+					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#575555ff' }]} onPress={() => { setIsPlaying(false); }}>
 						<Text style={styles.ctrlText}>Pausar</Text>
 					</TouchableOpacity>
-					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#666' }]} onPress={() => { onExit && onExit(); }}>
+					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#575555ff' }]} onPress={() => { onExit && onExit(); }}>
 						<Text style={styles.ctrlText}>Salir</Text>
 					</TouchableOpacity>
 				</View>
 			) : null}
 			<Text style={styles.status}>{status}</Text>
 
-			{/* Captured pieces panel */}
-			<View style={styles.capturesRow}>
-				{/* Piezas negras capturadas (capturadas por blancas) */}
-				<View style={styles.captureColumn}>
-					<Text style={styles.captureLabel}>Capturadas (negras)</Text>
-					<View style={styles.captureList}>
-						{engineRef.current && engineRef.current.obtenerPiezasCapturadas().b.map((p, i) => {
-							const key = `${p.color}${p.type}`;
-							const src = PIECE_IMAGES[key];
-							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
-						})}
-					</View>
+			{/* Layout: capturas izquierda - tablero - capturas derecha */}
+			{/* Capturas superiores */}
+			<View style={styles.capturesTop}>
+				<Text style={styles.captureLabel}>Capturadas (negras)</Text>
+				<View style={styles.captureRow}>
+					{engineRef.current && engineRef.current.obtenerPiezasCapturadas().b.map((p, i) => {
+						const key = `${p.color}${p.type}`;
+						const src = PIECE_IMAGES[key];
+						return src ? (
+							<View key={i} style={[styles.captureBadge, p.color === 'w' ? styles.captureBadgeWhiteBg : styles.captureBadgeBlackBg]}>
+								<Image source={src} style={styles.captureImg} resizeMode="contain" />
+							</View>
+						) : <Text key={i}>{key}</Text>;
+					})}
 				</View>
+			</View>
 
-				{/* Piezas blancas capturadas (capturadas por negras) */}
-				<View style={styles.captureColumn}>
-					<Text style={styles.captureLabel}>Capturadas (blancas)</Text>
-					<View style={styles.captureList}>
-						{engineRef.current && engineRef.current.obtenerPiezasCapturadas().w.map((p, i) => {
-							const key = `${p.color}${p.type}`;
-							const src = PIECE_IMAGES[key];
-							return src ? <Image key={i} source={src} style={styles.captureImg} /> : <Text key={i}>{key}</Text>;
-						})}
-					</View>
+			{/* Tablero central */}
+			<View style={styles.boardContainer}>
+				<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
+			</View>
+
+			{/* Capturas inferiores */}
+			<View style={styles.capturesBottom}>
+				<Text style={styles.captureLabel}>Capturadas (blancas)</Text>
+				<View style={styles.captureRow}>
+					{engineRef.current && engineRef.current.obtenerPiezasCapturadas().w.map((p, i) => {
+						const key = `${p.color}${p.type}`;
+						const src = PIECE_IMAGES[key];
+						return src ? (
+							<View key={i} style={[styles.captureBadge, p.color === 'w' ? styles.captureBadgeWhiteBg : styles.captureBadgeBlackBg]}>
+								<Image source={src} style={styles.captureImg} resizeMode="contain" />
+							</View>
+						) : <Text key={i}>{key}</Text>;
+					})}
 				</View>
 			</View>
 			{/* Controls bar */}
 			<View style={styles.controls}>
-				<TouchableOpacity style={styles.ctrlBtn} onPress={undoLastMove}>
-					<Text style={styles.ctrlText}>Deshacer</Text>
-				</TouchableOpacity>
-				<TouchableOpacity style={styles.ctrlBtn} onPress={restartGame}>
-					<Text style={styles.ctrlText}>Reiniciar</Text>
-				</TouchableOpacity>
-				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => {
-					if (loadedSavedId) {
-						// Actualizar sin pedir nombre
-						updateToLocal();
-					} else {
-						setSaveModalVisible(true);
-					}
-				}}>
-					<Text style={styles.ctrlText}>Guardar</Text>
+				{/* Botón único que abre modal compacto de acciones */}
+				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#444' }]} onPress={() => setActionsModalVisible(true)}>
+					<Text style={styles.ctrlText}>Acciones</Text>
 				</TouchableOpacity>
 				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#666' }]} onPress={() => { if (typeof onExit === 'function') onExit(); }}>
 					<Text style={styles.ctrlText}>Salir</Text>
 				</TouchableOpacity>
 			</View>
+
+			{/* Modal compacto con las acciones principales (botones grandes) */}
+			<Modal visible={actionsModalVisible} transparent animationType="fade">
+				<View style={styles.modalBackdrop}>
+					<View style={[styles.modalCard, { width: '86%', alignItems: 'stretch' }] }>
+						<Text style={styles.modalTitle}>Acciones</Text>
+						<View style={styles.modalDivider} />
+						<TouchableOpacity style={[styles.actionBigBtn]} onPress={() => { setActionsModalVisible(false); undoLastMove(); }}>
+							<Text style={styles.actionBigBtnText}>Deshacer</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.actionBigBtn]} onPress={() => { setActionsModalVisible(false); restartGame(); }}>
+							<Text style={styles.actionBigBtnText}>Reiniciar</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) updateToLocal(); else setSaveModalVisible(true); }}>
+							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Guardar</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#666' }]} onPress={() => { setActionsModalVisible(false); setHistoryModalVisible(true); }}>
+							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Historial</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2b2b2b' }]} onPress={() => { setActionsModalVisible(false); setAutoRotateEnabled(s => !s); setStatus(autoRotateEnabled ? 'Rotación automática desactivada' : 'Rotación automática activada'); }}>
+							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>{autoRotateEnabled ? 'Desactivar rotación automática' : 'Activar rotación automática'}</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.btn, styles.btnClose, { marginTop: 10 }]} onPress={() => setActionsModalVisible(false)}>
+							<Text style={styles.btnText}>Cerrar</Text>
+						</TouchableOpacity>
+					</View>
+				</View>
+			</Modal>
 
 			{/* Modal para guardar partida (local) */}
 			<Modal visible={saveModalVisible} transparent animationType="fade">
@@ -444,23 +594,37 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 					</View>
 				</View>
 			</Modal>
-			{/* Si hay jaque/attackers visibles, ocultamos el resaltado del último movimiento */}
-			<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} />
+			{/* El tablero ahora se renderiza dentro del bloque con capturas */}
 
-			{/* Move history panel */}
-			<View style={styles.historyContainer}>
-				<Text style={styles.historyTitle}>Historial</Text>
-				<ScrollView style={styles.historyList}>
-					{engineRef.current && engineRef.current.historialMovimientos.map((m, idx) => {
-						const pc = m.piece && m.piece.type ? `${m.piece.color}${m.piece.type}` : '??';
-						return (
-							<View key={idx} style={styles.historyItem}>
-								<Text style={styles.historyText}>{idx + 1}. {pc} {m.from.row},{m.from.col} → {m.to.row},{m.to.col}{m.capturedPiece ? ` x ${m.capturedPiece.color}${m.capturedPiece.type}` : ''}{m.special && m.special.promoted ? ' (promo)' : ''}</Text>
-							</View>
-						)
-						})}
-				</ScrollView>
-			</View>
+			{/* Historial en modal (se abre desde el menú) */}
+			<Modal visible={historyModalVisible} transparent animationType="fade">
+				<View style={[styles.modalBackdrop, { zIndex: 60 }] }>
+					<View style={[styles.modalCard, styles.historyModalCard, { width: '90%' }] }>
+						<Text style={[styles.modalTitle, styles.historyModalTitle]}>Historial de Movimientos</Text>
+						<ScrollView style={{ maxHeight: 360, width: '100%' }}>
+							{(() => {
+								const pairs = buildAlgebraicPairs();
+								return pairs.map((p, i) => (
+									<View key={i} style={styles.historyRow}>
+										<Text style={styles.historyNo}>{p.no}.</Text>
+										<View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+											{p.whitePiece && PIECE_IMAGES[p.whitePiece] ? <Image source={PIECE_IMAGES[p.whitePiece]} style={styles.historyPieceImg} /> : null}
+											<Text style={styles.historyMove}>{p.white || ''}</Text>
+										</View>
+										<View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+											{p.blackPiece && PIECE_IMAGES[p.blackPiece] ? <Image source={PIECE_IMAGES[p.blackPiece]} style={styles.historyPieceImg} /> : null}
+											<Text style={styles.historyMove}>{p.black || ''}</Text>
+										</View>
+									</View>
+								));
+							})()}
+						</ScrollView>
+						<View style={{ flexDirection: 'row', marginTop: 12, width: '100%' }}>
+							<TouchableOpacity style={styles.btn} onPress={() => setHistoryModalVisible(false)}><Text style={styles.btnText}>Cerrar</Text></TouchableOpacity>
+						</View>
+					</View>
+				</View>
+			</Modal>
 
 			{/* Modal de fin de partida */}
 			<Modal visible={gameOver} transparent animationType="fade">
@@ -500,23 +664,31 @@ const styles = StyleSheet.create({
 		color: '#333',
 	},
 	modalBackdrop: {
-		flex: 1,
+		position: 'absolute',
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
 		backgroundColor: 'rgba(0,0,0,0.45)',
 		alignItems: 'center',
 		justifyContent: 'center',
+		zIndex: 9999,
+		elevation: 20,
 	},
 	modalCard: {
 		width: '80%',
-		backgroundColor: '#fff',
+		backgroundColor: '#f2f2f2',
 		padding: 18,
 		borderRadius: 8,
 		elevation: 6,
-		alignItems: 'center',
+		alignItems: 'stretch',
+		maxHeight: '85%'
 	},
 	modalTitle: {
 		fontSize: 18,
 		fontWeight: '700',
 		marginBottom: 8,
+		textAlign: 'center'
 	},
 	modalText: {
 		marginBottom: 12,
@@ -590,19 +762,93 @@ const styles = StyleSheet.create({
 		height: 28,
 		margin: 4,
 	},
+	captureBadge: {
+		width: 36,
+		height: 36,
+		borderRadius: 18,
+		alignItems: 'center',
+		justifyContent: 'center',
+		margin: 4,
+		padding: 2,
+		borderWidth: 1,
+		borderColor: '#e0e0e0'
+	},
+	captureBadgeWhiteBg: {
+		backgroundColor: '#222',
+		borderColor: '#111'
+	},
+	captureBadgeBlackBg: {
+		backgroundColor: '#fff',
+		borderColor: '#ccc'
+	},
+	menuWrapper: {
+		position: 'absolute',
+		top: 12,
+		right: 18,
+		zIndex: 40,
+	},
+	menuButton: {
+		padding: 8,
+		backgroundColor: '#444',
+		borderRadius: 6,
+	},
+	menuDropdown: {
+		position: 'absolute',
+		top: 44,
+		right: 0,
+		backgroundColor: '#fff',
+		borderWidth: 1,
+		borderColor: '#ddd',
+		borderRadius: 6,
+		elevation: 8,
+		padding: 6,
+	},
+	menuItem: {
+		paddingVertical: 8,
+		paddingHorizontal: 12,
+	},
+	menuItemText: {
+		color: '#222',
+		fontWeight: '600'
+	},
 
 	historyContainer: {
 		width: '100%',
 		maxHeight: 140,
 		marginTop: 10,
 		borderTopWidth: 1,
-		borderTopColor: '#eee',
+		borderTopColor: '#797777ff',
 		paddingTop: 8,
 	},
 	historyTitle: {
 		fontWeight: '700',
 		marginBottom: 6,
 		textAlign: 'center'
+	},
+	historyRow: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'flex-start',
+		paddingVertical: 6,
+		borderBottomWidth: 1,
+		borderBottomColor: '#f0f0f0'
+	},
+	historyNo: {
+		width: 34,
+		fontWeight: '700',
+		textAlign: 'right',
+		marginRight: 10
+	},
+	historyMove: {
+		flex: 1,
+		textAlign: 'left',
+		color: '#222'
+	},
+	historyPieceImg: {
+		width: 20,
+		height: 20,
+		marginRight: 6,
+		resizeMode: 'contain'
 	},
 	historyList: {
 		width: '100%'
@@ -613,5 +859,58 @@ const styles = StyleSheet.create({
 	},
 	historyText: {
 		color: '#333'
+	},
+	historyModalCard: {
+		backgroundColor: '#888787ff'
+	},
+	historyModalTitle: {
+		color: '#222'
+	},
+	actionBigBtn: {
+		width: '100%',
+		paddingVertical: 12,
+		paddingHorizontal: 12,
+		borderRadius: 8,
+		marginVertical: 6,
+		backgroundColor: '#444',
+		alignItems: 'center',
+		justifyContent: 'center',
+		minHeight: 44
+	},
+	actionBigBtnText: {
+		color: '#fff',
+		fontWeight: '700'
+	},
+	modalDivider: {
+		width: '100%',
+		height: 10,
+		backgroundColor: 'transparent'
+	},
+
+	boardWithCaptures: {
+		flexDirection: 'column',
+		alignItems: 'center',
+		justifyContent: 'center',
+		width: '100%',
+		marginVertical: 8,
+	},
+	capturesTop: {
+		width: '100%',
+		alignItems: 'center',
+		marginBottom: 6,
+	},
+	capturesBottom: {
+		width: '100%',
+		alignItems: 'center',
+		marginTop: 6,
+	},
+	captureRow: {
+		flexDirection: 'row',
+		flexWrap: 'wrap',
+		justifyContent: 'center'
+	},
+	boardContainer: {
+		alignItems: 'center',
+		justifyContent: 'center'
 	},
 });

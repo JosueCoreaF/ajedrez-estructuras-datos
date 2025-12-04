@@ -372,7 +372,7 @@ export class MotorAjedrez {
       for (let c = 0; c < 8; c++) {
         const p = this.board[r][c];
         if (!p || p.color !== byColor) continue;
-        if (this._puedePiezaAlcanzar({ row: r, col: c }, square)) attackers.push({ row: r, col: c });
+        if (this._puedePiezaAlcanzar({ row: r, col: c }, square)) attackers.push({ row: r, col: c }); 
       }
     }
     return attackers;
@@ -505,5 +505,4 @@ export class MotorAjedrez {
     return false;
   }
 
-  // Fin de la clase MotorAjedrez (API ahora en español)
 }
