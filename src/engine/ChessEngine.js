@@ -1,10 +1,5 @@
-// src/engine/ChessEngine.js
-
 import { INITIAL_BOARD, COLORS } from '../utils/constants';
 
-// =======================================================
-// ESTRUCTURA DE DATOS PRINCIPAL: La Clase del Motor
-// =======================================================
 export class MotorAjedrez {
   // Matriz 8x8 para representar el tablero
   // Índice [fila][columna]
@@ -57,7 +52,12 @@ export class MotorAjedrez {
    * @param {object} to - { row: number, col: number } Posición final
    * @returns {boolean} - true si el movimiento es válido y se ejecuta.
    */
-  moverPieza(from, to) {
+  /**
+   * Mueve una pieza de 'from' a 'to'.
+   * Opcionalmente, para peones que alcancen la última fila, se puede
+   * especificar `promotionType` ('q','r','b','n') para la promoción.
+   */
+  moverPieza(from, to, promotionType = null) {
     // ANTES de ejecutar el movimiento, VERIFICA la validez
     if (!this.esMovimientoValido(from, to)) {
       console.log("Movimiento ILEGAL según las reglas de la pieza.");
@@ -122,18 +122,19 @@ export class MotorAjedrez {
     this.board[to.row][to.col] = { ...piece };
     this.board[from.row][from.col] = null; 
 
-    // Promotion
+    // Promotion: si un peón llega a la última fila se promueve.
+    // Permitimos elegir el tipo mediante `promotionType` ('q','r','b','n').
     const movedPiece = this.board[to.row][to.col];
     if (movedPiece && movedPiece.type === 'p') {
-      if (movedPiece.color === COLORS.WHITE && to.row === 0) {
-        this.board[to.row][to.col].type = 'q';
+      const promoteForWhite = movedPiece.color === COLORS.WHITE && to.row === 0;
+      const promoteForBlack = movedPiece.color === COLORS.BLACK && to.row === 7;
+      if (promoteForWhite || promoteForBlack) {
+        // validar promotionType
+        const allowed = ['q', 'r', 'b', 'n'];
+        const chosen = (typeof promotionType === 'string' && allowed.includes(promotionType)) ? promotionType : 'q';
+        this.board[to.row][to.col].type = chosen;
         moveRecord.special.promoted = true;
-        moveRecord.special.promotedTo = 'q';
-      }
-      if (movedPiece.color === COLORS.BLACK && to.row === 7) {
-        this.board[to.row][to.col].type = 'q';
-        moveRecord.special.promoted = true;
-        moveRecord.special.promotedTo = 'q';
+        moveRecord.special.promotedTo = chosen;
       }
     }
 

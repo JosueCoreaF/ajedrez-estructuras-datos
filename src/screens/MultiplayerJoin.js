@@ -72,7 +72,7 @@ export default function MultiplayerJoin({ onNavigate }) {
     <View style={styles.container}>
       <Text style={styles.title}>Unirse a partida</Text>
       <Text style={styles.label}>Código de la sala (ID)</Text>
-      <TextInput value={roomId} onChangeText={setRoomId} style={styles.input} placeholder="pegar el id de la sala" />
+      <TextInput value={roomId} onChangeText={setRoomId} style={styles.input} placeholder="Pega aqui el codigo"/>
       <TouchableOpacity style={styles.btn} onPress={handleJoin} disabled={loading || !roomId}>
         {loading ? <ActivityIndicator color="#fff"/> : <Text style={styles.btnText}>Unirse</Text>}
       </TouchableOpacity>

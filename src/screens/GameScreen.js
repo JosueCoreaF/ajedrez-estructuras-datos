@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image, Animated } from 'react-native';
 import Board from '../components/Board';
 import { MotorAjedrez } from '../engine/ChessEngine';
 import PIECE_IMAGES from '../components/icons';
@@ -626,6 +626,18 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	const [actionsModalVisible, setActionsModalVisible] = useState(false);
 	const [flipBoard, setFlipBoard] = useState(false);
 	const [autoRotateEnabled, setAutoRotateEnabled] = useState(true);
+	const [promotionModalVisible, setPromotionModalVisible] = useState(false);
+	const [promotionCandidate, setPromotionCandidate] = useState(null);
+	const promotionAnim = useRef(new Animated.Value(0)).current;
+
+	useEffect(() => {
+		if (promotionModalVisible) {
+			promotionAnim.setValue(0);
+			Animated.timing(promotionAnim, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+		} else {
+			Animated.timing(promotionAnim, { toValue: 0, duration: 160, useNativeDriver: true }).start();
+		}
+	}, [promotionModalVisible]);
 	const isMultiplayer = mode === 'multiplayer';
 
 	function tipoPiezaEsp(type) {
@@ -751,52 +763,60 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			return;
 		}
 
-		// Intentar mover desde selected -> {row,col}
-		const moved = engineRef.current.moverPieza(selected, { row, col });
+		// Antes de ejecutar el movimiento, comprobar si es una promoción de peón
+		const movingPiece = engineRef.current.board[selected.row][selected.col];
+		if (movingPiece && movingPiece.type === 'p') {
+			const isPromotion = (movingPiece.color === 'w' && row === 0) || (movingPiece.color === 'b' && row === 7);
+			if (isPromotion) {
+				setPromotionCandidate({ from: selected, to: { row, col } });
+				setPromotionModalVisible(true);
+				return;
+			}
+		}
+
+		// Ejecutamos performMove y dejamos que esa función gestione el resultado
+		await performMove(selected, { row, col });
+	};
+
+	// Función auxiliar que ejecuta el movimiento en el motor y realiza las acciones posteriores
+	async function performMove(from, to, promotionType = null) {
+		if (!engineRef.current) return;
+		const moved = engineRef.current.moverPieza(from, to, promotionType);
 		if (moved) {
 			setBoard(engineRef.current.obtenerTablero());
 			setSelected(null);
 			setHighlights([]);
-			setLastMove({ from: selected, to: { row, col } });
+			setLastMove({ from, to });
 
 			// If multiplayer mode and we have a loadedSharedId, send the move to the room
 			if (mode === 'multiplayer' && loadedSharedId) {
-				// build move object
+				const pieceObj = engineRef.current.board[to.row] && engineRef.current.board[to.row][to.col] ? engineRef.current.board[to.row][to.col] : null;
 				const mv = {
-					from: selected,
-					to: { row, col },
-					piece: engineRef.current.board[row] && engineRef.current.board[row][col] ? engineRef.current.board[row][col] : null,
-					san: moveToSAN({ from: selected, to: { row, col }, piece: engineRef.current.board[row] && engineRef.current.board[row][col] ? engineRef.current.board[row][col] : null }, engineRef.current)
+					from,
+					to,
+					piece: pieceObj,
+					san: moveToSAN({ from, to, piece: pieceObj }, engineRef.current)
 				};
 				await sendMoveToRoom(loadedSharedId, mv);
 			}
 
-			// Si estamos en modo local (pass-and-play) y la rotación automática está activada,
-			// girar la vista tras cada movimiento
-			if (mode === 'local' && autoRotateEnabled) {
-				setFlipBoard(s => !s);
-			}
+			if (mode === 'local' && autoRotateEnabled) setFlipBoard(s => !s);
 
-			// Comprobar empate por solo reyes
 			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
 				setAttackers([]);
 				setGameOver(true);
 				return;
 			}
-			// Después del movimiento, comprobar jaque / jaque mate para el oponente
-			const opponent = engineRef.current.turnoActual; // ya fue cambiado en moverPieza
-			// Nota: el motor no elimina al rey ni debe permitir capturarlo.
-			// Confiamos en la detección de jaque mate para terminar la partida.
+
+			const opponent = engineRef.current.turnoActual;
 			if (engineRef.current.estaReyEnJaque(opponent)) {
 				const attackersList = engineRef.current.obtenerAtacantesDelRey(opponent);
 				setAttackers(attackersList);
 				if (engineRef.current.esJaqueMate(opponent)) {
-					// El oponente está en jaque mate -> el jugador que movió ha ganado
 					const winner = opponent === 'w' ? 'b' : 'w';
 					setStatus('Jaque mate');
 					setGameOver(true);
-					// Finalizar la partida: guardar en historial y eliminar la partida guardada si aplica
 					await finalizeMatch(winner);
 				} else {
 					setStatus('Jaque');
@@ -806,44 +826,9 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setAttackers([]);
 			}
 		} else {
-			// Determinar por qué falló: ¿fue porque dejaría al rey en jaque?
-			const eng = engineRef.current;
-			let movingPiece = null;
-			if (eng && eng.board && selected) movingPiece = eng.board[selected.row][selected.col];
-			const wouldBeInCheck = eng && typeof eng._estariaEnJaqueTrasMovimiento === 'function' && eng._estariaEnJaqueTrasMovimiento(selected, { row, col });
-			if (wouldBeInCheck) {
-				// Simular el movimiento para calcular atacantes; si movemos el rey,
-				// interesa quién ataca la casilla destino; si movemos otra pieza,
-				// interesa quién atacaría al rey tras la retirada (ataque descubierto).
-				const from = selected;
-				const to = { row, col };
-				const origFrom = eng.board[from.row][from.col];
-				const origTo = eng.board[to.row][to.col];
-				// Aplicar movimiento temporal
-				eng.board[to.row][to.col] = origFrom ? { ...origFrom } : null;
-				eng.board[from.row][from.col] = null;
-				let attackersList = [];
-				if (movingPiece && movingPiece.type === 'k') {
-					// Si es el rey el que se mueve: atacantes sobre la casilla destino
-					const opponent = movingPiece.color === 'w' ? 'b' : 'w';
-					attackersList = eng.obtenerAtacantesDeCasilla(to, opponent) || [];
-					setStatus(`Movimiento inválido: la casilla estaría atacada por ${attackersList.length} pieza(s)`);
-				} else {
-					// Si es otra pieza: calculamos atacantes del rey después del movimiento
-					const kingAttackers = eng.obtenerAtacantesDelRey(movingPiece.color) || [];
-					attackersList = kingAttackers;
-					setStatus(`Movimiento inválido: dejaría a tu rey en jaque por ${attackersList.length} pieza(s)`);
-				}
-				// Restaurar
-				eng.board[from.row][from.col] = origFrom;
-				eng.board[to.row][to.col] = origTo;
-				setAttackers(attackersList);
-			} else {
-				setStatus('Movimiento inválido');
-			}
-			// Mantener la selección para intentar mover a otra casilla
+			setStatus('Movimiento inválido');
 		}
-	};
+	}
 
 	const restartGame = () => {
 		engineRef.current = new MotorAjedrez();
@@ -1081,6 +1066,41 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			</Modal>
 			{/* El tablero ahora se renderiza dentro del bloque con capturas */}
 
+			{/* Modal para selección de promoción de peón */}
+			<Modal visible={promotionModalVisible} transparent animationType="none">
+				<View style={styles.modalBackdrop}>
+					<Animated.View style={[styles.modalCard, { width: '86%', alignItems: 'center', opacity: promotionAnim, transform: [{ scale: promotionAnim.interpolate({ inputRange: [0,1], outputRange: [0.9,1] }) }] }]}>
+						<Text style={styles.modalTitle}>Promocionar peón</Text>
+						<Text style={{ marginBottom: 12 }}>Elige la pieza para la promoción</Text>
+						<View style={styles.promoOptionsRow}>
+							{(() => {
+								// determinar color del peón que promociona
+								let color = 'w';
+								try {
+									if (promotionCandidate && engineRef.current && engineRef.current.board && engineRef.current.board[promotionCandidate.from.row]) {
+										color = engineRef.current.board[promotionCandidate.from.row][promotionCandidate.from.col].color || 'w';
+									}
+								} catch (_) { color = 'w'; }
+								const opts = [ ['q','Dama'], ['r','Torre'], ['b','Alfil'], ['n','Caballo'] ];
+								return opts.map(([type,label]) => {
+									const key = `${color}${type}`;
+									const src = PIECE_IMAGES[key];
+									return (
+										<TouchableOpacity key={type} style={styles.promoOption} onPress={async () => { setPromotionModalVisible(false); if (promotionCandidate) await performMove(promotionCandidate.from, promotionCandidate.to, type); setPromotionCandidate(null); }}>
+											{src ? <Image source={src} style={styles.promoOptionImg} /> : <Text style={styles.actionBigBtnText}>{label}</Text>}
+											<Text style={styles.promoOptionLabel}>{label}</Text>
+										</TouchableOpacity>
+									);
+								});
+							})()}
+						</View>
+						<TouchableOpacity style={[styles.btn, styles.btnClose, { marginTop: 10 }]} onPress={() => { setPromotionModalVisible(false); setPromotionCandidate(null); setSelected(null); setHighlights([]); setStatus('Promoción cancelada'); }}>
+							<Text style={styles.btnText}>Cancelar</Text>
+						</TouchableOpacity>
+					</Animated.View>
+				</View>
+			</Modal>
+
 			{/* Historial en modal (se abre desde el menú) */}
 			<Modal visible={historyModalVisible} transparent animationType="fade">
 				<View style={[styles.modalBackdrop, { zIndex: 60 }] }>
@@ -1150,6 +1170,32 @@ const styles = StyleSheet.create({
 		justifyContent: 'center',
 		padding: 16,
 		backgroundColor: '#fff',
+	},
+	promoOptionsRow: {
+		flexDirection: 'row',
+		justifyContent: 'space-around',
+		width: '100%',
+		marginBottom: 8,
+	},
+	promoOption: {
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: 8,
+		flex: 1,
+		marginHorizontal: 6,
+		backgroundColor: '#fff',
+		borderRadius: 8,
+		elevation: 4,
+	},
+	promoOptionImg: {
+		width: 48,
+		height: 48,
+		marginBottom: 6,
+		resizeMode: 'contain'
+	},
+	promoOptionLabel: {
+		fontWeight: '700',
+		color: '#222'
 	},
 	status: {
 		marginBottom: 8,
