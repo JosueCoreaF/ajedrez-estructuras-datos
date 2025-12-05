@@ -80,6 +80,13 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		};
 	}, []);
 
+		// Desactivar rotación automática en modo multijugador
+		useEffect(() => {
+			if (mode === 'multiplayer') {
+				setAutoRotateEnabled(false);
+			}
+		}, [mode]);
+
 	// If a roomId prop is passed (joining), use it to load & subscribe
 	useEffect(() => {
 		if (mode === 'multiplayer' && roomId) {
@@ -609,6 +616,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	const [actionsModalVisible, setActionsModalVisible] = useState(false);
 	const [flipBoard, setFlipBoard] = useState(false);
 	const [autoRotateEnabled, setAutoRotateEnabled] = useState(true);
+	const isMultiplayer = mode === 'multiplayer';
 
 	function tipoPiezaEsp(type) {
 		if (!type) return '';
@@ -967,10 +975,26 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 					<View style={[styles.modalCard, { width: '86%', alignItems: 'stretch' }] }>
 						<Text style={styles.modalTitle}>Acciones</Text>
 						<View style={styles.modalDivider} />
-						<TouchableOpacity style={[styles.actionBigBtn]} onPress={() => { setActionsModalVisible(false); undoLastMove(); }}>
+						<TouchableOpacity
+							style={[styles.actionBigBtn, isMultiplayer ? styles.disabledBtn : null]}
+							onPress={() => {
+								if (isMultiplayer) { setStatus('Acción no disponible en modo multijugador'); return; }
+								setActionsModalVisible(false);
+								undoLastMove();
+							}}
+							disabled={isMultiplayer}
+						>
 							<Text style={styles.actionBigBtnText}>Deshacer</Text>
 						</TouchableOpacity>
-						<TouchableOpacity style={[styles.actionBigBtn]} onPress={() => { setActionsModalVisible(false); restartGame(); }}>
+						<TouchableOpacity
+							style={[styles.actionBigBtn, isMultiplayer ? styles.disabledBtn : null]}
+							onPress={() => {
+								if (isMultiplayer) { setStatus('Acción no disponible en modo multijugador'); return; }
+								setActionsModalVisible(false);
+								restartGame();
+							}}
+							disabled={isMultiplayer}
+						>
 							<Text style={styles.actionBigBtnText}>Reiniciar</Text>
 						</TouchableOpacity>
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) updateToLocal(); else setSaveModalVisible(true); }}>
@@ -982,7 +1006,16 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#666' }]} onPress={() => { setActionsModalVisible(false); setHistoryModalVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Historial</Text>
 						</TouchableOpacity>
-						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2b2b2b' }]} onPress={() => { setActionsModalVisible(false); setAutoRotateEnabled(s => !s); setStatus(autoRotateEnabled ? 'Rotación automática desactivada' : 'Rotación automática activada'); }}>
+						<TouchableOpacity
+							style={[styles.actionBigBtn, { backgroundColor: '#2b2b2b' }, isMultiplayer ? styles.disabledBtn : null]}
+							onPress={() => {
+								if (isMultiplayer) { setStatus('Rotación no disponible en modo multijugador'); return; }
+								setActionsModalVisible(false);
+								setAutoRotateEnabled(s => !s);
+								setStatus(autoRotateEnabled ? 'Rotación automática desactivada' : 'Rotación automática activada');
+							}}
+							disabled={isMultiplayer}
+						>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>{autoRotateEnabled ? 'Desactivar rotación automática' : 'Activar rotación automática'}</Text>
 						</TouchableOpacity>
 						<TouchableOpacity style={[styles.btn, styles.btnClose, { marginTop: 10 }]} onPress={() => setActionsModalVisible(false)}>
@@ -1044,10 +1077,18 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						<Text style={styles.modalTitle}>Partida terminada</Text>
 						<Text style={styles.modalText}>{status || 'Jaque mate'}</Text>
 						<View style={styles.modalButtons}>
-							<TouchableOpacity style={styles.btn} onPress={restartGame}>
+							<TouchableOpacity
+								style={[styles.btn, isMultiplayer ? styles.disabledBtn : null]}
+								onPress={() => { if (isMultiplayer) { setStatus('Acción no disponible en modo multijugador'); return; } restartGame(); }}
+								disabled={isMultiplayer}
+							>
 								<Text style={styles.btnText}>Reiniciar</Text>
 							</TouchableOpacity>
-							<TouchableOpacity style={styles.btn} onPress={undoLastMove}>
+							<TouchableOpacity
+								style={[styles.btn, isMultiplayer ? styles.disabledBtn : null]}
+								onPress={() => { if (isMultiplayer) { setStatus('Acción no disponible en modo multijugador'); return; } undoLastMove(); }}
+								disabled={isMultiplayer}
+							>
 								<Text style={styles.btnText}>Deshacer</Text>
 							</TouchableOpacity>
 							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => setGameOver(false)}>
@@ -1340,5 +1381,9 @@ const styles = StyleSheet.create({
 		borderRadius: 6,
 		borderWidth: 1,
 		borderColor: '#ddd'
+	},
+	disabledBtn: {
+		backgroundColor: '#999',
+		opacity: 0.75,
 	},
 });
