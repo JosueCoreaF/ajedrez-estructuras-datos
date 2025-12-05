@@ -932,53 +932,56 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			</View>
 
 			{/* Tablero central */}
+			<View style={styles.boardContainer}>
+				<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
+			</View>
+
+			{/* Overlay que bloquea toda la pantalla mientras esperamos al oponente */}
 			{mode === 'multiplayer' && waitingForOpponent ? (
-				<View style={styles.waitingContainer}>
-					<Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Esperando oponente</Text>
-					<Text style={{ marginBottom: 12 }}>Comparte este código para que se unan:</Text>
-					<Text selectable style={styles.inviteCode}>{inviteCode || loadedSharedId || savedId || '---'}</Text>
-					{/* Participants debug info */}
-					<View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
-						<Text style={{ marginBottom: 6 }}>Participantes: {participants ? participants.length : 0}</Text>
-						{participants && participants.map((p, i) => (
-							<Text key={i} style={{ fontSize: 12, color: '#333' }}>{p.color?.toUpperCase() || '?'} • {String(p.user_id).slice(0, 8)}{myUserRef.current && String(p.user_id) === String(myUserRef.current.id) ? ' (tú)' : ''}</Text>
-						))}
-					</View>
-						<View style={{ flexDirection: 'row', marginTop: 12 }}>
-						<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(inviteCode || loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
-							<Text style={styles.btnText}>Copiar código</Text>
-						</TouchableOpacity>
-						<TouchableOpacity style={[styles.btn, { marginRight: 8, backgroundColor: '#c94a4a' }]} onPress={async () => {
-							// Close room (only owner allowed)
-							try {
-								const myId = myUserRef.current?.id || null;
-								if (!myId) { setStatus('Necesitas estar autenticado para cerrar la sala'); return; }
-								if (!roomOwnerId || String(myId) !== String(roomOwnerId)) { setStatus('Solo el creador puede cerrar la sala'); return; }
-								setStatus('Cerrando sala...');
-								// delete participants first
-								await supabase.from('shared_game_participants').delete().eq('room_id', loadedSharedId);
-								// delete room
-								await supabase.from('shared_games').delete().eq('id', loadedSharedId);
-								unsubscribeParticipants(); unsubscribeRoom();
-								setStatus('Sala cerrada');
-								if (onExit) onExit();
-							} catch (e) {
-								console.warn('Error closing room', e);
-								setStatus('Error cerrando sala');
-							}
-						}}>
-							<Text style={styles.btnText}>Cerrar partida</Text>
-						</TouchableOpacity>
-						<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { unsubscribeParticipants(); unsubscribeRoom(); if (onExit) onExit(); }}>
-							<Text style={styles.btnText}>Salir</Text>
-						</TouchableOpacity>
+				<View style={styles.screenOverlay} pointerEvents="auto">
+					<View style={styles.waitingContainer}>
+						<Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Esperando oponente</Text>
+						<Text style={{ marginBottom: 12 }}>Comparte este código para que se unan:</Text>
+						<Text selectable style={styles.inviteCode}>{inviteCode || loadedSharedId || savedId || '---'}</Text>
+						{/* Participants debug info */}
+						<View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
+							<Text style={{ marginBottom: 6 }}>Participantes: {participants ? participants.length : 0}</Text>
+							{participants && participants.map((p, i) => (
+								<Text key={i} style={{ fontSize: 12, color: '#333' }}>{p.color?.toUpperCase() || '?'} • {String(p.user_id).slice(0, 8)}{myUserRef.current && String(p.user_id) === String(myUserRef.current.id) ? ' (tú)' : ''}</Text>
+							))}
+						</View>
+							<View style={{ flexDirection: 'row', marginTop: 12 }}>
+							<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(inviteCode || loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
+								<Text style={styles.btnText}>Copiar código</Text>
+							</TouchableOpacity>
+							<TouchableOpacity style={[styles.btn, { marginRight: 8, backgroundColor: '#c94a4a' }]} onPress={async () => {
+								// Close room (only owner allowed)
+								try {
+									const myId = myUserRef.current?.id || null;
+									if (!myId) { setStatus('Necesitas estar autenticado para cerrar la sala'); return; }
+									if (!roomOwnerId || String(myId) !== String(roomOwnerId)) { setStatus('Solo el creador puede cerrar la sala'); return; }
+									setStatus('Cerrando sala...');
+									// delete participants first
+									await supabase.from('shared_game_participants').delete().eq('room_id', loadedSharedId);
+									// delete room
+									await supabase.from('shared_games').delete().eq('id', loadedSharedId);
+									unsubscribeParticipants(); unsubscribeRoom();
+									setStatus('Sala cerrada');
+									if (onExit) onExit();
+								} catch (e) {
+									console.warn('Error closing room', e);
+									setStatus('Error cerrando sala');
+								}
+							}}>
+								<Text style={styles.btnText}>Cerrar partida</Text>
+							</TouchableOpacity>
+							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { unsubscribeParticipants(); unsubscribeRoom(); if (onExit) onExit(); }}>
+								<Text style={styles.btnText}>Salir</Text>
+							</TouchableOpacity>
+						</View>
 					</View>
 				</View>
-			) : (
-				<View style={styles.boardContainer}>
-					<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
-				</View>
-			)}
+			) : null}
 
 			{/* Capturas inferiores */}
 			<View style={styles.capturesBottom}>
@@ -1040,9 +1043,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) updateToLocal(); else setSaveModalVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Guardar</Text>
 						</TouchableOpacity>
-						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#0b6fa4' }]} onPress={() => { setActionsModalVisible(false); if (loadedSharedId) updateRemoteRoom(); else createRemoteRoom(); }}>
-							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>{loadedSharedId ? 'Actualizar en la nube' : 'Subir partida'}</Text>
-						</TouchableOpacity>
+						{/* "Actualizar en la nube" eliminado según solicitud del usuario */}
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#666' }]} onPress={() => { setActionsModalVisible(false); setHistoryModalVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Historial</Text>
 						</TouchableOpacity>
@@ -1412,6 +1413,18 @@ const styles = StyleSheet.create({
 		backgroundColor: '#f7f7f7',
 		borderRadius: 8,
 		width: '90%'
+	},
+	screenOverlay: {
+		position: 'absolute',
+		top: 0,
+		left: 0,
+		right: 0,
+		bottom: 0,
+		backgroundColor: 'rgba(255,255,255,0.95)',
+		alignItems: 'center',
+		justifyContent: 'center',
+		zIndex: 9999,
+		elevation: 30,
 	},
 	inviteCode: {
 		fontSize: 16,
