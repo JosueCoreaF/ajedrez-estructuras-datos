@@ -27,7 +27,10 @@ export class MotorAjedrez {
         if (this.board[r][c]) this.board[r][c].hasMoved = false;
       }
     }
-    console.log("Motor de Ajedrez Inicializado. Turno: Blanco");
+    // La inicialización del motor puede ocurrir varias veces (re-render / reload).
+    // Comentamos este log para evitar ruido repetido en la consola.
+    // Si necesitas depuración, habilita la siguiente línea manualmente.
+    // console.log("Motor de Ajedrez Inicializado. Turno: Blanco");
   }
 
   // Devuelve una copia del registro de piezas capturadas

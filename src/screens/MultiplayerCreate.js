@@ -21,7 +21,15 @@ export default function MultiplayerCreate({ onNavigate }) {
         onNavigate('auth');
         return;
       }
-      const payload = { owner_id: user.id, name: name || `Partida ${new Date().toISOString()}`, log_text: '', public: true };
+      // generate a short invite code (6 chars) and store it inside metadata to avoid DB schema changes
+      const makeCode = (len = 6) => {
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // avoid ambiguous chars
+        let s = '';
+        for (let i = 0; i < len; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+        return s;
+      };
+      const inviteCode = makeCode(6);
+      const payload = { owner_id: user.id, name: name || `Partida ${new Date().toISOString()}`, log_text: '', public: true, metadata: { invite_code: inviteCode } };
       const { data, error } = await supabase.from('shared_games').insert([payload]).select().single();
       if (error) throw error;
       setCreated(data);
@@ -31,8 +39,8 @@ export default function MultiplayerCreate({ onNavigate }) {
           await supabase.from('shared_game_participants').insert([{ room_id: data.id, user_id: user.id, color: 'w' }]);
         }
       } catch (e) { console.warn('Error adding participant', e); }
-      // navigate to game in multiplayer mode (creator enters waiting room)
-      onNavigate('game', { mode: 'multiplayer', roomId: data.id, savedName: data.name, savedId: data.id });
+      // navigate to game in multiplayer mode (creator enters waiting room) and pass invite code
+      onNavigate('game', { mode: 'multiplayer', roomId: data.id, savedName: data.name, savedId: data.id, inviteCode });
     } catch (e) {
       console.warn('Error creating shared game', e);
       setError(String(e.message || e));
@@ -53,8 +61,9 @@ export default function MultiplayerCreate({ onNavigate }) {
       {created ? (
         <View style={styles.result}>
           <Text style={styles.resultLabel}>Sala creada:</Text>
-          <Text selectable style={styles.resultId}>{created.id}</Text>
-          <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={() => onNavigate('game', { mode: 'multiplayer', roomId: created.id, savedName: created.name, savedId: created.id })}>
+          <Text selectable style={styles.resultId}>ID: {created.id}</Text>
+          <Text selectable style={[styles.resultId, { marginTop: 6 }]}>Código: {created.metadata?.invite_code || inviteCode}</Text>
+          <TouchableOpacity style={[styles.btn, { marginTop: 10 }]} onPress={() => onNavigate('game', { mode: 'multiplayer', roomId: created.id, savedName: created.name, savedId: created.id, inviteCode: created.metadata?.invite_code || inviteCode })}>
             <Text style={styles.btnText}>Entrar a la sala</Text>
               </TouchableOpacity>
         </View>

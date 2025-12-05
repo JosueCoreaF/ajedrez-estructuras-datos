@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
 import supabase from '../utils/supabaseClient';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AuthScreen({ onSignedIn, onBack }) {
   const [email, setEmail] = useState('');
@@ -20,7 +21,11 @@ export default function AuthScreen({ onSignedIn, onBack }) {
           setStatus('Error: ' + res.error.message);
         } else {
           setStatus('Registro enviado. Revisa tu correo para confirmar (si aplica).');
-          if (onSignedIn) onSignedIn(res.data?.user || null);
+          const user = res.data?.user || null;
+          if (user) {
+            try { await AsyncStorage.setItem('current_user', JSON.stringify(user)); } catch (e) { console.warn('save user error', e); }
+          }
+          if (onSignedIn) onSignedIn(user);
         }
       } else {
         // fallback generic
@@ -40,7 +45,14 @@ export default function AuthScreen({ onSignedIn, onBack }) {
       if (supabase.auth && typeof supabase.auth.signInWithPassword === 'function') {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) setStatus('Error: ' + error.message);
-        else { setStatus('Sesión iniciada'); if (onSignedIn) onSignedIn(data.user || null); }
+        else {
+          setStatus('Sesión iniciada');
+          const user = data.user || null;
+          if (user) {
+            try { await AsyncStorage.setItem('current_user', JSON.stringify(user)); } catch (e) { console.warn('save user error', e); }
+          }
+          if (onSignedIn) onSignedIn(user);
+        }
       } else if (supabase.auth && typeof supabase.auth.signIn === 'function') {
         const { user, session, error } = await supabase.auth.signIn({ email, password });
         if (error) setStatus('Error: ' + error.message);
@@ -82,7 +94,11 @@ export default function AuthScreen({ onSignedIn, onBack }) {
         <Text style={styles.btnText}>Volver</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={[styles.btn, styles.signoutBtn]} onPress={handleSignOut}>
+      <TouchableOpacity style={[styles.btn, styles.signoutBtn]} onPress={async () => {
+        await handleSignOut();
+        try { await AsyncStorage.removeItem('current_user'); } catch (_) {}
+        if (onSignedIn) onSignedIn(null);
+      }}>
         <Text style={styles.btnText}>Cerrar sesión</Text>
       </TouchableOpacity>
 

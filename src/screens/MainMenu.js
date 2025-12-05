@@ -1,13 +1,20 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
-export default function MainMenu({ onNavigate }) {
+export default function MainMenu({ onNavigate, user, onSignOut }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Ajedrez — Menú</Text>
-      <TouchableOpacity style={[styles.btn, { backgroundColor: '#555' }]} onPress={() => onNavigate('auth')}>
-        <Text style={styles.btnText}>Iniciar sesión / Registrarse</Text>
-      </TouchableOpacity>
+      {user ? (
+        <View style={{ width: '100%', marginBottom: 12, alignItems: 'center' }}>
+          <Text style={{ fontSize: 16 }}>Hola, {user?.user_metadata?.full_name || user?.email || 'Jugador'}</Text>
+          {onSignOut ? (
+            <TouchableOpacity style={[styles.btn, { backgroundColor: '#aa4444', marginTop: 8 }]} onPress={onSignOut}>
+              <Text style={styles.btnText}>Cerrar sesión</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      ) : null}
       <TouchableOpacity style={styles.btn} onPress={() => onNavigate('new') }>
         <Text style={styles.btnText}>Nueva partida</Text>
       </TouchableOpacity>
@@ -32,8 +39,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 },
   title: { fontSize: 22, fontWeight: '700', marginBottom: 24 },
   section: { width: '100%', marginTop: 12, alignItems: 'center' },
-  sectionTitle: { fontSize: 16, fontWeight: '700', marginBottom: 8, color: '#333' },
-  smallBtn: { width: '80%', paddingVertical: 10, backgroundColor: '#4a7bd4' },
+  sectionTitle: { fontSize: 22, fontWeight: '700', marginBottom: 8, color: '#333' },
+  smallBtn: { width: '100%', paddingVertical: 10, backgroundColor: '#4a7bd4' },
   btn: { width: '100%', padding: 14, backgroundColor: '#2f95dc', borderRadius: 8, marginVertical: 8, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: '600' }
 });

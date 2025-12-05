@@ -8,7 +8,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../utils/supabaseClient';
 import * as Clipboard from 'expo-clipboard';
 
-export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, onExit }) {
+export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit }) {
 	const engineRef = useRef();
 	const [board, setBoard] = useState([]);
 	const [selected, setSelected] = useState(null);
@@ -19,7 +19,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
     const myUserRef = useRef(null);
 	const participantsChannelRef = useRef(null);
 	const [participants, setParticipants] = useState([]);
-	const [waitingForOpponent, setWaitingForOpponent] = useState(false);
+	// start in waiting state for multiplayer to avoid flashing the board briefly
+	const [waitingForOpponent, setWaitingForOpponent] = useState(mode === 'multiplayer');
+	const [inviteCode, setInviteCode] = useState(inviteCodeProp || null);
+	const [roomOwnerId, setRoomOwnerId] = useState(null);
 	const [myColor, setMyColor] = useState(null);
 		const [highlights, setHighlights] = useState([]);
 		const [attackers, setAttackers] = useState([]);
@@ -465,6 +468,13 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		async function loadRoomState(roomId) {
 			try {
 				setStatus('Cargando estado de la sala...');
+				// also try to load room metadata (invite code)
+				try {
+					const { data: gameMeta, error: gmErr } = await supabase.from('shared_games').select('metadata, owner_id').eq('id', roomId).maybeSingle();
+					if (gmErr) console.warn('loadRoomState metadata error', gmErr);
+					if (gameMeta && gameMeta.metadata && gameMeta.metadata.invite_code) setInviteCode(gameMeta.metadata.invite_code);
+					if (gameMeta && gameMeta.owner_id) setRoomOwnerId(gameMeta.owner_id);
+				} catch (me) { console.warn('metadata fetch error', me); }
 				const { data, error } = await supabase
 					.from('shared_game_moves')
 					.select('*')
@@ -674,6 +684,12 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		if (!engineRef.current) return;
 		if (gameOver) {
 			// Partida terminada: ignorar interacciones posteriores (status ya indica resultado)
+			return;
+		}
+
+		// If we're waiting for opponent, block board interactions
+		if (mode === 'multiplayer' && waitingForOpponent) {
+			setStatus('Esperando oponente — las acciones del tablero están deshabilitadas');
 			return;
 		}
 
@@ -920,7 +936,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				<View style={styles.waitingContainer}>
 					<Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Esperando oponente</Text>
 					<Text style={{ marginBottom: 12 }}>Comparte este código para que se unan:</Text>
-					<Text selectable style={styles.inviteCode}>{loadedSharedId || savedId || '---'}</Text>
+					<Text selectable style={styles.inviteCode}>{inviteCode || loadedSharedId || savedId || '---'}</Text>
 					{/* Participants debug info */}
 					<View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
 						<Text style={{ marginBottom: 6 }}>Participantes: {participants ? participants.length : 0}</Text>
@@ -928,9 +944,30 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 							<Text key={i} style={{ fontSize: 12, color: '#333' }}>{p.color?.toUpperCase() || '?'} • {String(p.user_id).slice(0, 8)}{myUserRef.current && String(p.user_id) === String(myUserRef.current.id) ? ' (tú)' : ''}</Text>
 						))}
 					</View>
-					<View style={{ flexDirection: 'row', marginTop: 12 }}>
-						<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
+						<View style={{ flexDirection: 'row', marginTop: 12 }}>
+						<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(inviteCode || loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
 							<Text style={styles.btnText}>Copiar código</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.btn, { marginRight: 8, backgroundColor: '#c94a4a' }]} onPress={async () => {
+							// Close room (only owner allowed)
+							try {
+								const myId = myUserRef.current?.id || null;
+								if (!myId) { setStatus('Necesitas estar autenticado para cerrar la sala'); return; }
+								if (!roomOwnerId || String(myId) !== String(roomOwnerId)) { setStatus('Solo el creador puede cerrar la sala'); return; }
+								setStatus('Cerrando sala...');
+								// delete participants first
+								await supabase.from('shared_game_participants').delete().eq('room_id', loadedSharedId);
+								// delete room
+								await supabase.from('shared_games').delete().eq('id', loadedSharedId);
+								unsubscribeParticipants(); unsubscribeRoom();
+								setStatus('Sala cerrada');
+								if (onExit) onExit();
+							} catch (e) {
+								console.warn('Error closing room', e);
+								setStatus('Error cerrando sala');
+							}
+						}}>
+							<Text style={styles.btnText}>Cerrar partida</Text>
 						</TouchableOpacity>
 						<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { unsubscribeParticipants(); unsubscribeRoom(); if (onExit) onExit(); }}>
 							<Text style={styles.btnText}>Salir</Text>
@@ -961,7 +998,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			{/* Controls bar */}
 			<View style={styles.controls}>
 				{/* Botón único que abre modal compacto de acciones */}
-				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#444' }]} onPress={() => setActionsModalVisible(true)}>
+				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#444' }]} onPress={() => {
+					if (mode === 'multiplayer' && waitingForOpponent) { setStatus('Acciones no disponibles hasta que entre el oponente'); return; }
+					setActionsModalVisible(true);
+				}}>
 					<Text style={styles.ctrlText}>Acciones</Text>
 				</TouchableOpacity>
 				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#666' }]} onPress={() => { if (typeof onExit === 'function') onExit(); }}>

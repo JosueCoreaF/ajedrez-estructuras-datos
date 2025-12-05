@@ -20,17 +20,35 @@ export default function MultiplayerJoin({ onNavigate }) {
           onNavigate('auth');
           return;
         }
-        // find the game
-        const { data: game, error: gError } = await supabase.from('shared_games').select('*').eq('id', roomId).maybeSingle();
-        if (gError) throw gError;
-        if (!game) throw new Error('Room not found');
-        // compute color assignment simplistic: if there is already a participant with w -> assign b
-        const partsRes = await supabase.from('shared_game_participants').select('*').eq('room_id', roomId).order('joined_at', { ascending: true });
+        // Only allow joining by short invite code (metadata.invite_code)
+        const code = String(roomId || '').trim().toUpperCase();
+        if (!code || code.length < 3 || code.length > 12) {
+          setError('Código inválido. Usa el código corto proporcionado por el creador.');
+          setLoading(false);
+          return;
+        }
+        let game = null;
+        try {
+          const { data: byCode, error: eCode } = await supabase.from('shared_games').select('*').filter('metadata->>invite_code', 'eq', code).maybeSingle();
+          if (eCode) throw eCode;
+          if (byCode) game = byCode;
+        } catch (err) {
+          console.warn('search by invite_code error', err);
+          throw err;
+        }
+        if (!game) {
+          setError('Sala no encontrada con ese código. Asegúrate de usar el código corto.');
+          setLoading(false);
+          return;
+        }
+        // compute color assignment simplistic: check participants by actual game id
+        const roomUuid = game.id;
+        const partsRes = await supabase.from('shared_game_participants').select('*').eq('room_id', roomUuid).order('joined_at', { ascending: true });
         const participants = partsRes?.data || [];
         if (partsRes?.error) console.warn('participants select error', partsRes.error);
         const hasWhite = (participants || []).some(p => p.color === 'w');
         const assignColor = hasWhite ? 'b' : 'w';
-        const insertRes = await supabase.from('shared_game_participants').insert([{ room_id: roomId, user_id: user.id, color: assignColor }]).select().single();
+        const insertRes = await supabase.from('shared_game_participants').insert([{ room_id: roomUuid, user_id: user.id, color: assignColor }]).select().single();
         if (insertRes?.error) {
           console.warn('Error inserting participant', insertRes.error);
           setError('No se pudo añadir participante: ' + (insertRes.error.message || String(insertRes.error)));
@@ -38,9 +56,10 @@ export default function MultiplayerJoin({ onNavigate }) {
           return;
         }
         // try to mark started (optional)
-        try { await supabase.from('shared_games').update({ started: true }).eq('id', roomId); } catch (_) {}
+        try { await supabase.from('shared_games').update({ started: true }).eq('id', roomUuid); } catch (_) {}
       // navegar a GameScreen en modo multiplayer y pasar el roomId para suscribirse
-      onNavigate('game', { mode: 'multiplayer', replayLog: game?.log_text || null, savedName: game?.name || null, savedId: game?.id || null, roomId: roomId });
+      // pass roomId as the actual game id so GameScreen subscribes correctly
+      onNavigate('game', { mode: 'multiplayer', replayLog: game?.log_text || null, savedName: game?.name || null, savedId: game?.id || null, roomId: game.id });
     } catch (e) {
       console.warn('Error joining shared game', e);
       setError(String(e.message || e));
