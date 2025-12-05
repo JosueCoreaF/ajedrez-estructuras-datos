@@ -7,6 +7,7 @@ import { TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../utils/supabaseClient';
 import * as Clipboard from 'expo-clipboard';
+import { tipoPiezaEsp, squareToAlgebraic, moveToSAN, buildAlgebraicPairs, parseMovesFromLog, buildLogFromHistory } from '../utils/gameUtils';
 
 export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit }) {
 	const engineRef = useRef();
@@ -41,7 +42,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 
 		// Si entramos en modo resume, aplicar inmediatamente los movimientos guardados
-		if (mode === 'resume' && replayLog) {
+	    if (mode === 'resume' && replayLog) {
 			engineRef.current = new MotorAjedrez();
 			const moves = parseMovesFromLog(replayLog);
 			for (const m of moves) {
@@ -218,115 +219,14 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	// --- Estado y helpers para guardar partida (local) ---
 	const [saveModalVisible, setSaveModalVisible] = useState(false);
 	const [saveName, setSaveName] = useState('');
+	// buildLogFromHistory moved to src/utils/gameUtils.js
 
-	function buildLogFromHistory() {
-		if (!engineRef.current) return '';
-		const header = `Partida iniciada: ${new Date().toISOString()}`;
-	const lines = (engineRef.current.historialMovimientos || []).map(m => {
-			const tipo = m.piece && m.piece.type ? tipoPiezaEsp(m.piece.type) : '??';
-			const pieceId = m.piece && m.piece.type ? `${m.piece.color}${tipo}` : '??';
-			return `Movimiento ejecutado: ${pieceId} de ${m.from.row},${m.from.col} a ${m.to.row},${m.to.col}`;
-		});
-		return [header].concat(lines).join('\n');
-	}
-
-	// --- Notación algebraica (español) para historial ---
-	function squareToAlgebraic({ row, col }) {
-		if (row == null || col == null) return '??';
-		const file = String.fromCharCode(97 + col); // a..h
-		const rank = 8 - row; // row 0 -> 8
-		return `${file}${rank}`;
-	}
-
-	function moveToSAN(move, engineInstance) {
-		if (!move || !move.piece) return '??';
-		const color = move.piece.color;
-		const type = (move.piece.type || 'p').toLowerCase();
-		// Detect castling by king moving two cols
-		if (type === 'k' && Math.abs(move.from.col - move.to.col) === 2) {
-			return move.to.col > move.from.col ? 'O-O' : 'O-O-O';
-		}
-		const dest = squareToAlgebraic(move.to);
-		const isCapture = !!(move.capturedPiece || move.capture);
-		const promo = move.special && move.special.promoted ? '=' + tipoPiezaEsp(move.special.promotedTo || 'q') : '';
-
-		// Piece letter in Spanish (empty for pawns)
-		const pieceLetter = type === 'p' ? '' : tipoPiezaEsp(type);
-
-		// Disambiguation: check if other same-type pieces of same color can also reach dest
-		let disamb = '';
-		if (type !== 'p') {
-			const board = engineInstance.obtenerTablero();
-			const candidates = [];
-			for (let r = 0; r < 8; r++) {
-				for (let c = 0; c < 8; c++) {
-					const p = board[r][c];
-					if (p && p.type && p.type.toLowerCase() === type && p.color === color) {
-						// skip the moving piece origin
-						if (r === move.from.row && c === move.from.col) continue;
-						// generate moves for this piece and see if it can reach dest
-						const moves = engineInstance.generarMovimientos({ row: r, col: c }) || [];
-						if (moves.find(m => m.row === move.to.row && m.col === move.to.col)) {
-							candidates.push({ row: r, col: c });
-						}
-					}
-				}
-			}
-			if (candidates.length > 0) {
-				// If multiple, include file or rank as needed. Prefer file if files differ.
-				const sameFile = candidates.every(x => x.col === move.from.col);
-				const sameRank = candidates.every(x => x.row === move.from.row);
-				if (!sameFile) disamb = String.fromCharCode(97 + move.from.col);
-				else if (!sameRank) disamb = String(8 - move.from.row);
-				else disamb = String.fromCharCode(97 + move.from.col);
-			}
-		}
-
-		// Pawn captures include file of origin (exd5)
-		if (type === 'p') {
-			if (isCapture) {
-				const fromFile = String.fromCharCode(97 + move.from.col);
-				return `${fromFile}x${dest}${promo}`;
-			}
-			return `${dest}${promo}`;
-		}
-
-		const capMark = isCapture ? 'x' : '';
-		return `${pieceLetter}${disamb}${capMark}${dest}${promo}`;
-	}
-
-	function buildAlgebraicPairs() {
-		const hist = engineRef.current ? (engineRef.current.historialMovimientos || []) : [];
-		const tempEngine = new MotorAjedrez();
-		const pairs = [];
-		for (let i = 0; i < hist.length; i++) {
-			const mv = hist[i];
-			// Use tempEngine in current state to compute SAN for this move
-			const san = moveToSAN(mv, tempEngine);
-			// determine piece key for icon (e.g., 'wp','bq')
-			const pieceKey = mv.piece && mv.piece.type ? `${mv.piece.color}${mv.piece.type}` : null;
-			// apply the move on tempEngine to keep it in sync
-			const ok = tempEngine.moverPieza(mv.from, mv.to);
-			if (!ok) {
-				// fallback: apply raw
-				const piece = tempEngine.board[mv.from.row][mv.from.col];
-				tempEngine.board[mv.to.row][mv.to.col] = piece;
-				tempEngine.board[mv.from.row][mv.from.col] = null;
-			}
-			if (i % 2 === 0) {
-				pairs.push({ no: Math.floor(i / 2) + 1, white: san, whitePiece: pieceKey, black: '', blackPiece: null });
-			} else {
-				pairs[pairs.length - 1].black = san;
-				pairs[pairs.length - 1].blackPiece = pieceKey;
-			}
-		}
-		return pairs;
-	}
+	// Notación algebraica y helpers moved to src/utils/gameUtils.js
 
 	async function finalizeMatch(winnerColor) {
 		try {
 			const winnerName = winnerColor === 'w' ? 'Blancas' : 'Negras';
-			const finalLog = buildLogFromHistory() + `\nPartida finalizada: ${new Date().toISOString()}\nResultado: Ganador: ${winnerName}`;
+			const finalLog = buildLogFromHistory(engineRef.current) + `\nPartida finalizada: ${new Date().toISOString()}\nResultado: Ganador: ${winnerName}`;
 			const payload = {
 				id: `match-${Date.now()}`,
 				name: saveName || `Partida ${new Date().toISOString()}`,
@@ -358,7 +258,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	}
 
 	async function saveToLocal() {
-		const payload = { id: `local-${Date.now()}`, name: saveName || `Partida ${new Date().toISOString()}`, log_text: buildLogFromHistory(), savedAt: new Date().toISOString() };
+		const payload = { id: `local-${Date.now()}`, name: saveName || `Partida ${new Date().toISOString()}`, log_text: buildLogFromHistory(engineRef.current), savedAt: new Date().toISOString() };
 		try {
 			setStatus('Guardando localmente...');
 			const raw = await AsyncStorage.getItem('saved_games');
@@ -388,7 +288,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setStatus('No se encontró la partida local para actualizar');
 				return;
 			}
-			arr[idx].log_text = buildLogFromHistory();
+			arr[idx].log_text = buildLogFromHistory(engineRef.current);
 			arr[idx].savedAt = new Date().toISOString();
 			// keep name unless user changed it
 			arr[idx].name = saveName || arr[idx].name;
@@ -418,7 +318,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			const payload = {
 				owner_id: user.id,
 				name: saveName || `Partida ${new Date().toISOString()}`,
-				log_text: buildLogFromHistory(),
+				log_text: buildLogFromHistory(engineRef.current),
 				public: false,
 				metadata: {}
 			};
@@ -586,7 +486,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setStatus('Necesitas iniciar sesión para actualizar la sala remota');
 				return;
 			}
-			const updates = { log_text: buildLogFromHistory() };
+			const updates = { log_text: buildLogFromHistory(engineRef.current) };
 			if (saveName) updates.name = saveName;
 			const { data, error } = await supabase.from('shared_games').update(updates).eq('id', loadedSharedId).eq('owner_id', user.id).select().single();
 			if (error) {
@@ -640,30 +540,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	}, [promotionModalVisible]);
 	const isMultiplayer = mode === 'multiplayer';
 
-	function tipoPiezaEsp(type) {
-		if (!type) return '';
-		switch (type.toLowerCase()) {
-			case 'k': return 'R'; // Rey
-			case 'q': return 'D'; // Dama
-			case 'r': return 'T'; // Torre
-			case 'b': return 'A'; // Alfil
-			case 'n': return 'C'; // Caballo
-			case 'p': return 'p'; // Peón
-			default: return type.toUpperCase();
-		}
-	}
-
-	function parseMovesFromLog(logText) {
-		const lines = String(logText).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-		const moves = [];
-		for (const line of lines) {
-			const m = line.match(/Movimiento ejecutado:\s*\w+\s+de\s+(\d+),(\d+)\s+a\s+(\d+),(\d+)/);
-			if (m) {
-				moves.push({ from: { row: parseInt(m[1], 10), col: parseInt(m[2], 10) }, to: { row: parseInt(m[3], 10), col: parseInt(m[4], 10) }, raw: line });
-			}
-		}
-		return moves;
-	}
+	// tipoPiezaEsp & parseMovesFromLog moved to src/utils/gameUtils.js
 
 	async function playReplay(logText, speed = 500) {
 		if (!logText) return;
@@ -1085,10 +962,15 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 								return opts.map(([type,label]) => {
 									const key = `${color}${type}`;
 									const src = PIECE_IMAGES[key];
+									const optionStyle = [
+										styles.promoOption,
+										color === 'w' ? styles.promoOptionLightPiece : styles.promoOptionDarkPiece
+									];
+									const labelStyle = [styles.promoOptionLabel, color === 'w' ? { color: '#fff' } : {}];
 									return (
-										<TouchableOpacity key={type} style={styles.promoOption} onPress={async () => { setPromotionModalVisible(false); if (promotionCandidate) await performMove(promotionCandidate.from, promotionCandidate.to, type); setPromotionCandidate(null); }}>
+										<TouchableOpacity key={type} style={optionStyle} onPress={async () => { setPromotionModalVisible(false); if (promotionCandidate) await performMove(promotionCandidate.from, promotionCandidate.to, type); setPromotionCandidate(null); }}>
 											{src ? <Image source={src} style={styles.promoOptionImg} /> : <Text style={styles.actionBigBtnText}>{label}</Text>}
-											<Text style={styles.promoOptionLabel}>{label}</Text>
+											<Text style={labelStyle}>{label}</Text>
 										</TouchableOpacity>
 									);
 								});
@@ -1108,7 +990,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						<Text style={[styles.modalTitle, styles.historyModalTitle]}>Historial de Movimientos</Text>
 						<ScrollView style={{ maxHeight: 360, width: '100%' }}>
 							{(() => {
-								const pairs = buildAlgebraicPairs();
+								const pairs = buildAlgebraicPairs(engineRef.current);
 								return pairs.map((p, i) => (
 									<View key={i} style={styles.historyRow}>
 										<Text style={styles.historyNo}>{p.no}.</Text>
@@ -1183,9 +1065,16 @@ const styles = StyleSheet.create({
 		padding: 8,
 		flex: 1,
 		marginHorizontal: 6,
-		backgroundColor: '#fff',
 		borderRadius: 8,
 		elevation: 4,
+	},
+	promoOptionLightPiece: {
+		backgroundColor: '#222',
+	},
+	promoOptionDarkPiece: {
+		backgroundColor: '#fff',
+		borderWidth: 1,
+		borderColor: '#e6e6e6'
 	},
 	promoOptionImg: {
 		width: 48,

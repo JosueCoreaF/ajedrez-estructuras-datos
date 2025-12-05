@@ -69,7 +69,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       {screen === 'menu' && <MainMenu onNavigate={(r) => navigateTo(r)} user={currentUser} onSignOut={handleSignOut} />}
-      {screen === 'auth' && <AuthScreen onSignedIn={(u) => handleSignedIn(u)} onBack={() => navigateTo('menu')} />}
+      {screen === 'auth' && <AuthScreen onSignedIn={(u) => handleSignedIn(u)} />}
       {screen === 'saved' && <SavedGamesScreen onBack={() => navigateTo('menu')} onOpenSaved={handleOpenSaved} />}
       {screen === 'game' && <GameScreen {...screenProps} onExit={() => navigateTo('menu')} />}
       {screen === 'new' && <GameScreen mode={'local'} onExit={() => navigateTo('menu')} />}

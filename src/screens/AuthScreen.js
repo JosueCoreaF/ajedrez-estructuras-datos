@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-nativ
 import supabase from '../utils/supabaseClient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function AuthScreen({ onSignedIn, onBack }) {
+export default function AuthScreen({ onSignedIn }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -64,16 +64,6 @@ export default function AuthScreen({ onSignedIn, onBack }) {
     } finally { setLoading(false); }
   }
 
-  async function handleSignOut() {
-    try {
-      await supabase.auth.signOut();
-      await AsyncStorage.removeItem('current_user');
-      setStatus('Sesión cerrada');
-      if (onSignedIn) onSignedIn(null);
-    } catch (e) {
-      setStatus('Error cerrando sesión: ' + String(e));
-    }
-  }
 
   return (
     <View style={styles.container}>
@@ -112,9 +102,6 @@ const styles = StyleSheet.create({
   inputMinimal: { width: '100%', borderBottomWidth: 1, borderColor: '#e6e6e6', paddingVertical: 10, marginBottom: 14, fontSize: 16 },
   primaryBtn: { marginTop: 8, backgroundColor: '#1f6feb', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   primaryBtnText: { color: '#fff', fontWeight: '700' },
-  linkBtn: { marginTop: 12, alignItems: 'center' },
-  linkText: { color: '#666' },
-  ghostBtn: { marginTop: 8, alignItems: 'center' },
-  ghostText: { color: '#b00' },
+  
   status: { marginTop: 14, color: '#333', textAlign: 'center' }
 });
