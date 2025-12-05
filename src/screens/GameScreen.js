@@ -5,13 +5,22 @@ import { MotorAjedrez } from '../engine/ChessEngine';
 import PIECE_IMAGES from '../components/icons';
 import { TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import supabase from '../utils/supabaseClient';
+import * as Clipboard from 'expo-clipboard';
 
-export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, onExit }) {
+export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, onExit }) {
 	const engineRef = useRef();
 	const [board, setBoard] = useState([]);
 	const [selected, setSelected] = useState(null);
 	const [status, setStatus] = useState('');
 	const [loadedSavedId, setLoadedSavedId] = useState(null);
+	const [loadedSharedId, setLoadedSharedId] = useState(null); // id en shared_games (Supabase)
+    const roomChannelRef = useRef(null);
+    const myUserRef = useRef(null);
+	const participantsChannelRef = useRef(null);
+	const [participants, setParticipants] = useState([]);
+	const [waitingForOpponent, setWaitingForOpponent] = useState(false);
+	const [myColor, setMyColor] = useState(null);
 		const [highlights, setHighlights] = useState([]);
 		const [attackers, setAttackers] = useState([]);
 		const [gameOver, setGameOver] = useState(false);
@@ -55,7 +64,146 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			if (savedId) setLoadedSavedId(savedId);
 			setStatus('Partida cargada: lista para continuar');
 		}
+
+		// obtener usuario actual si auth disponible
+		(async () => {
+			try {
+				const r = await supabase.auth.getUser();
+				myUserRef.current = r?.data?.user || r?.user || null;
+			} catch (_) { myUserRef.current = null; }
+		})();
+
+		// cleanup on unmount: unsubscribe realtime and participants
+		return () => {
+			try { unsubscribeRoom(); } catch (_) {}
+			try { unsubscribeParticipants(); } catch (_) {}
+		};
 	}, []);
+
+	// If a roomId prop is passed (joining), use it to load & subscribe
+	useEffect(() => {
+		if (mode === 'multiplayer' && roomId) {
+			setLoadedSharedId(roomId);
+		}
+	}, [roomId]);
+
+	// When loadedSharedId changes, initialize room state + subscription
+	useEffect(() => {
+		if (mode === 'multiplayer' && loadedSharedId) {
+			loadRoomState(loadedSharedId).then(() => subscribeToRoom(loadedSharedId, async (rec) => {
+				try {
+					const myId = myUserRef.current?.id || null;
+					if (rec.by_user && myId && rec.by_user === myId) return;
+					const from = { row: rec.from_row, col: rec.from_col };
+					const to = { row: rec.to_row, col: rec.to_col };
+					const ok = engineRef.current.moverPieza(from, to);
+					if (!ok) {
+						const piece = engineRef.current.board[from.row][from.col];
+						engineRef.current.board[to.row][to.col] = piece;
+						engineRef.current.board[from.row][from.col] = null;
+					}
+					setBoard(engineRef.current.obtenerTablero());
+					setLastMove({ from, to });
+				} catch (e) { console.warn('remote move handler', e); }
+			}));
+
+			// load participants and subscribe to changes
+			loadParticipants(loadedSharedId).then(() => subscribeToParticipants(loadedSharedId, (evt) => {
+				// reload participants on any event
+				loadParticipants(loadedSharedId);
+				if (evt && evt.action === 'INSERT') {
+					// if second participant joined, clear waiting flag
+					const parts = participantsChannelRef.current; // just for trace
+					setWaitingForOpponent(false);
+				}
+			}));
+		}
+	}, [loadedSharedId]);
+
+	// --- Participants helpers (wait room) ---
+
+	async function loadParticipants(roomId) {
+		try {
+				const { data, error } = await supabase.from('shared_game_participants').select('*').eq('room_id', roomId).order('joined_at', { ascending: true });
+				if (error) {
+					console.warn('loadParticipants error', error);
+					return;
+				}
+				setParticipants(data || []);
+				console.log('loadParticipants ->', data || []);
+				const parts = data || [];
+				setWaitingForOpponent(parts.length < 2);
+				// determine my color if I'm a participant
+				try {
+					const myId = myUserRef.current?.id || null;
+					if (myId) {
+						const mine = parts.find(p => String(p.user_id) === String(myId));
+						if (mine && mine.color) {
+							setMyColor(mine.color);
+							// flip board for black players
+							setFlipBoard(mine.color === 'b');
+						} else {
+							setMyColor(null);
+						}
+					}
+					// If there are now 2 or more participants, ensure the room is initialized and subscribed
+					if (parts.length >= 2) {
+						setWaitingForOpponent(false);
+						try {
+							if (!roomChannelRef.current) {
+								await loadRoomState(roomId);
+								subscribeToRoom(roomId, async (rec) => {
+									try {
+										console.log('remote move received', rec);
+										const myId2 = myUserRef.current?.id || null;
+										if (rec.by_user && myId2 && rec.by_user === myId2) return;
+										const from = { row: rec.from_row, col: rec.from_col };
+										const to = { row: rec.to_row, col: rec.to_col };
+										const ok = engineRef.current.moverPieza(from, to);
+										if (!ok) {
+											const piece = engineRef.current.board[from.row][from.col];
+											engineRef.current.board[to.row][to.col] = piece;
+											engineRef.current.board[from.row][from.col] = null;
+										}
+										setBoard(engineRef.current.obtenerTablero());
+										setLastMove({ from, to });
+									} catch (e) { console.warn('remote move handler', e); }
+								});
+							}
+						} catch (e) { console.warn('ensure subscribe after participants', e); }
+					}
+				} catch (e) { console.warn('determine myColor error', e); }
+			} catch (e) { console.warn('loadParticipants exception', e); }
+	}
+
+	function subscribeToParticipants(roomId, onEvent) {
+		try {
+			// unsubscribe if exists
+			if (participantsChannelRef.current) {
+				try { participantsChannelRef.current.unsubscribe(); } catch (_) {}
+				participantsChannelRef.current = null;
+			}
+			const chan = supabase.channel(`room-participants:${roomId}`);
+			chan.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shared_game_participants', filter: `room_id=eq.${roomId}` }, (payload) => {
+				onEvent({ action: 'INSERT', record: payload.new });
+			});
+			chan.on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'shared_game_participants', filter: `room_id=eq.${roomId}` }, (payload) => {
+				onEvent({ action: 'DELETE', record: payload.old });
+			});
+			chan.subscribe();
+			participantsChannelRef.current = chan;
+			return chan;
+		} catch (e) { console.warn('subscribeToParticipants error', e); }
+	}
+
+	function unsubscribeParticipants() {
+		try {
+			if (participantsChannelRef.current) {
+				try { participantsChannelRef.current.unsubscribe(); } catch (_) {}
+				participantsChannelRef.current = null;
+			}
+		} catch (e) { console.warn('unsubscribeParticipants', e); }
+	}
 
 	// --- Estado y helpers para guardar partida (local) ---
 	const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -241,6 +389,218 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 	}
 
+	// --- Supabase remote (shared_games) ---
+	async function createRemoteRoom() {
+		try {
+			setStatus('Creando sala remota...');
+			// try v2 auth getUser() first
+			let user = null;
+			if (supabase.auth && typeof supabase.auth.getUser === 'function') {
+				const res = await supabase.auth.getUser();
+				user = res?.data?.user || res?.user || null;
+			} else if (supabase.auth && typeof supabase.auth.user === 'function') {
+				user = supabase.auth.user();
+			}
+			if (!user) {
+				setStatus('Necesitas iniciar sesión para crear una sala remota');
+				return;
+			}
+			const payload = {
+				owner_id: user.id,
+				name: saveName || `Partida ${new Date().toISOString()}`,
+				log_text: buildLogFromHistory(),
+				public: false,
+				metadata: {}
+			};
+			const { data, error } = await supabase.from('shared_games').insert([payload]).select().single();
+			if (error) {
+				setStatus('Error creando sala remota: ' + (error.message || String(error)));
+				return;
+			}
+			setLoadedSharedId(data.id);
+			// set current user id ref
+			try {
+				const resUser = await supabase.auth.getUser();
+				myUserRef.current = resUser?.data?.user || resUser?.user || null;
+			} catch (_) { myUserRef.current = null; }
+			// Copiar id al portapapeles
+			try { await Clipboard.setStringAsync(String(data.id)); } catch (_) {}
+			setStatus('Sala creada. ID copiado al portapapeles: ' + String(data.id));
+			// After creating, if in multiplayer mode, initialize room state and subscribe
+			if (mode === 'multiplayer') {
+				// small delay to allow DB to register the room
+				setTimeout(() => {
+					loadRoomState(data.id).then(() => subscribeToRoom(data.id, async (rec) => {
+						// handle remote move event
+						try {
+							const myId = myUserRef.current?.id || null;
+							if (rec.by_user && myId && rec.by_user === myId) return; // ignore own inserts
+							const from = { row: rec.from_row, col: rec.from_col };
+							const to = { row: rec.to_row, col: rec.to_col };
+							const ok = engineRef.current.moverPieza(from, to);
+							if (!ok) {
+								const piece = engineRef.current.board[from.row][from.col];
+								engineRef.current.board[to.row][to.col] = piece;
+								engineRef.current.board[from.row][from.col] = null;
+							}
+							setBoard(engineRef.current.obtenerTablero());
+							setLastMove({ from, to });
+						} catch (e) { console.warn('remote move handler', e); }
+					}));
+				}, 250);
+			}
+		} catch (e) {
+			setStatus('Error creando sala remota: ' + String(e));
+		}
+	}
+
+		// --- Real-time & room state helpers (moved to top-level of component) ---
+		async function loadRoomState(roomId) {
+			try {
+				setStatus('Cargando estado de la sala...');
+				const { data, error } = await supabase
+					.from('shared_game_moves')
+					.select('*')
+					.eq('room_id', roomId)
+					.order('created_at', { ascending: true });
+				if (error) {
+					console.warn('Error loading room moves', error);
+					setStatus('Error cargando movimientos de la sala');
+					return;
+				}
+				// Recreate engine and apply moves sequentially
+				const temp = new MotorAjedrez();
+				for (const rec of data || []) {
+					const from = { row: rec.from_row, col: rec.from_col };
+					const to = { row: rec.to_row, col: rec.to_col };
+					const ok = temp.moverPieza(from, to);
+					if (!ok) {
+						const piece = temp.board[from.row][from.col];
+						temp.board[to.row][to.col] = piece;
+						temp.board[from.row][from.col] = null;
+					}
+				}
+				engineRef.current = temp;
+				setBoard(engineRef.current.obtenerTablero());
+				if (data && data.length) {
+					const last = data[data.length - 1];
+					setLastMove({ from: { row: last.from_row, col: last.from_col }, to: { row: last.to_row, col: last.to_col } });
+				}
+				setStatus('Estado de sala cargado');
+			} catch (e) {
+				console.warn('loadRoomState error', e);
+				setStatus('Error cargando sala');
+			}
+		}
+
+		function subscribeToRoom(roomId, onRemoteMove) {
+			try {
+				if (roomChannelRef.current) {
+					try { roomChannelRef.current.unsubscribe(); } catch (_) {}
+					roomChannelRef.current = null;
+				}
+				const chan = supabase.channel(`room:${roomId}`);
+				chan.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shared_game_moves', filter: `room_id=eq.${roomId}` }, (payload) => {
+					const rec = payload?.new;
+					if (rec) onRemoteMove(rec);
+				});
+				chan.subscribe();
+				roomChannelRef.current = chan;
+				setStatus(s => (s ? s + ' · Suscrito a sala' : 'Suscrito a sala'));
+				return chan;
+			} catch (e) {
+				console.warn('subscribeToRoom error', e);
+				setStatus('Error suscribiendo a sala');
+			}
+		}
+
+		function unsubscribeRoom() {
+			try {
+				if (roomChannelRef.current) {
+					try { roomChannelRef.current.unsubscribe(); } catch (_) {}
+					roomChannelRef.current = null;
+				}
+			} catch (e) { console.warn('unsubscribeRoom', e); }
+		}
+
+		async function sendMoveToRoom(roomId, move) {
+			try {
+				if (!roomId) return;
+				const user = myUserRef.current;
+				const payload = {
+					room_id: roomId,
+					from_row: move.from.row,
+					from_col: move.from.col,
+					to_row: move.to.row,
+					to_col: move.to.col,
+					piece_type: move.piece?.type || null,
+					piece_color: move.piece?.color || null,
+					san: move.san || null,
+					by_user: user?.id || null
+				};
+				const { data, error } = await supabase.from('shared_game_moves').insert([payload]).select();
+				if (error) {
+					console.warn('sendMoveToRoom error', error);
+					setStatus('Error enviando movimiento');
+				}
+			} catch (e) {
+				console.warn('sendMoveToRoom exception', e);
+				setStatus('Error enviando movimiento');
+			}
+		}
+
+	async function updateRemoteRoom() {
+		try {
+			if (!loadedSharedId) {
+				setStatus('No hay sala remota cargada para actualizar');
+				return;
+			}
+
+		
+			setStatus('Actualizando sala remota...');
+			let user = null;
+			if (supabase.auth && typeof supabase.auth.getUser === 'function') {
+				const res = await supabase.auth.getUser();
+				user = res?.data?.user || res?.user || null;
+			} else if (supabase.auth && typeof supabase.auth.user === 'function') {
+				user = supabase.auth.user();
+			}
+			if (!user) {
+				setStatus('Necesitas iniciar sesión para actualizar la sala remota');
+				return;
+			}
+			const updates = { log_text: buildLogFromHistory() };
+			if (saveName) updates.name = saveName;
+			const { data, error } = await supabase.from('shared_games').update(updates).eq('id', loadedSharedId).eq('owner_id', user.id).select().single();
+			if (error) {
+				setStatus('Error actualizando sala remota: ' + (error.message || String(error)));
+				return;
+			}
+			setStatus('Sala remota actualizada: ' + String(loadedSharedId));
+			// if we haven't subscribed yet and in multiplayer, initialize
+			if (mode === 'multiplayer' && loadedSharedId && !roomChannelRef.current) {
+				loadRoomState(loadedSharedId).then(() => subscribeToRoom(loadedSharedId, async (rec) => {
+					try {
+						const myId = myUserRef.current?.id || null;
+						if (rec.by_user && myId && rec.by_user === myId) return;
+						const from = { row: rec.from_row, col: rec.from_col };
+						const to = { row: rec.to_row, col: rec.to_col };
+						const ok = engineRef.current.moverPieza(from, to);
+						if (!ok) {
+							const piece = engineRef.current.board[from.row][from.col];
+							engineRef.current.board[to.row][to.col] = piece;
+							engineRef.current.board[from.row][from.col] = null;
+						}
+						setBoard(engineRef.current.obtenerTablero());
+						setLastMove({ from, to });
+					} catch (e) { console.warn('remote move handler', e); }
+				}));
+			}
+		} catch (e) {
+			setStatus('Error actualizando sala remota: ' + String(e));
+		}
+	}
+
 	// --- Replayer state ---
 	const [replayMoves, setReplayMoves] = useState([]);
 	const [isPlaying, setIsPlaying] = useState(false);
@@ -309,6 +669,19 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			return;
 		}
 
+		// In multiplayer, ensure user has a color and it's their turn
+		if (mode === 'multiplayer') {
+			if (!myColor) {
+				setStatus('Aún no tienes color asignado');
+				return;
+			}
+			const turnoActual = engineRef.current.turnoActual || 'w';
+			if (turnoActual !== myColor) {
+				setStatus('No es tu turno');
+				return;
+			}
+		}
+
 		const piece = board[row] && board[row][col];
 
 		// Si no hay selección previa
@@ -361,6 +734,18 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			setSelected(null);
 			setHighlights([]);
 			setLastMove({ from: selected, to: { row, col } });
+
+			// If multiplayer mode and we have a loadedSharedId, send the move to the room
+			if (mode === 'multiplayer' && loadedSharedId) {
+				// build move object
+				const mv = {
+					from: selected,
+					to: { row, col },
+					piece: engineRef.current.board[row] && engineRef.current.board[row][col] ? engineRef.current.board[row][col] : null,
+					san: moveToSAN({ from: selected, to: { row, col }, piece: engineRef.current.board[row] && engineRef.current.board[row][col] ? engineRef.current.board[row][col] : null }, engineRef.current)
+				};
+				await sendMoveToRoom(loadedSharedId, mv);
+			}
 
 			// Si estamos en modo local (pass-and-play) y la rotación automática está activada,
 			// girar la vista tras cada movimiento
@@ -523,9 +908,32 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			</View>
 
 			{/* Tablero central */}
-			<View style={styles.boardContainer}>
-				<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
-			</View>
+			{mode === 'multiplayer' && waitingForOpponent ? (
+				<View style={styles.waitingContainer}>
+					<Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Esperando oponente</Text>
+					<Text style={{ marginBottom: 12 }}>Comparte este código para que se unan:</Text>
+					<Text selectable style={styles.inviteCode}>{loadedSharedId || savedId || '---'}</Text>
+					{/* Participants debug info */}
+					<View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
+						<Text style={{ marginBottom: 6 }}>Participantes: {participants ? participants.length : 0}</Text>
+						{participants && participants.map((p, i) => (
+							<Text key={i} style={{ fontSize: 12, color: '#333' }}>{p.color?.toUpperCase() || '?'} • {String(p.user_id).slice(0, 8)}{myUserRef.current && String(p.user_id) === String(myUserRef.current.id) ? ' (tú)' : ''}</Text>
+						))}
+					</View>
+					<View style={{ flexDirection: 'row', marginTop: 12 }}>
+						<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
+							<Text style={styles.btnText}>Copiar código</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { unsubscribeParticipants(); unsubscribeRoom(); if (onExit) onExit(); }}>
+							<Text style={styles.btnText}>Salir</Text>
+						</TouchableOpacity>
+					</View>
+				</View>
+			) : (
+				<View style={styles.boardContainer}>
+					<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
+				</View>
+			)}
 
 			{/* Capturas inferiores */}
 			<View style={styles.capturesBottom}>
@@ -567,6 +975,9 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						</TouchableOpacity>
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) updateToLocal(); else setSaveModalVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Guardar</Text>
+						</TouchableOpacity>
+						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#0b6fa4' }]} onPress={() => { setActionsModalVisible(false); if (loadedSharedId) updateRemoteRoom(); else createRemoteRoom(); }}>
+							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>{loadedSharedId ? 'Actualizar en la nube' : 'Subir partida'}</Text>
 						</TouchableOpacity>
 						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#666' }]} onPress={() => { setActionsModalVisible(false); setHistoryModalVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Historial</Text>
@@ -912,5 +1323,22 @@ const styles = StyleSheet.create({
 	boardContainer: {
 		alignItems: 'center',
 		justifyContent: 'center'
+	},
+	waitingContainer: {
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: 16,
+		backgroundColor: '#f7f7f7',
+		borderRadius: 8,
+		width: '90%'
+	},
+	inviteCode: {
+		fontSize: 16,
+		fontWeight: '700',
+		padding: 8,
+		backgroundColor: '#fff',
+		borderRadius: 6,
+		borderWidth: 1,
+		borderColor: '#ddd'
 	},
 });
