@@ -7,9 +7,9 @@ import { TextInput } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import supabase from '../utils/supabaseClient';
 import * as Clipboard from 'expo-clipboard';
-import { tipoPiezaEsp, squareToAlgebraic, moveToSAN, buildAlgebraicPairs, parseMovesFromLog, buildLogFromHistory } from '../utils/gameUtils';
+import { tipoPiezaEsp, casillaAAlgebraica, movimientoASAN, construirParesAlgebricos, parsearMovimientosDeLog, construirLogHistorial } from '../utils/gameUtils';
 
-export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit }) {
+export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit: alSalir }) {
 	const engineRef = useRef();
 	const [board, setBoard] = useState([]);
 	const [selected, setSelected] = useState(null);
@@ -19,16 +19,16 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
     const roomChannelRef = useRef(null);
     const myUserRef = useRef(null);
 	const participantsChannelRef = useRef(null);
-	const [participants, setParticipants] = useState([]);
+	const [participantes, setParticipantes] = useState([]);
 	// start in waiting state for multiplayer to avoid flashing the board briefly
-	const [waitingForOpponent, setWaitingForOpponent] = useState(mode === 'multiplayer');
-	const [inviteCode, setInviteCode] = useState(inviteCodeProp || null);
-	const [roomOwnerId, setRoomOwnerId] = useState(null);
-	const [myColor, setMyColor] = useState(null);
+	const [esperandoOponente, setEsperandoOponente] = useState(mode === 'multiplayer');
+	const [codigoInvitacion, setCodigoInvitacion] = useState(inviteCodeProp || null);
+	const [idPropietarioSala, setIdPropietarioSala] = useState(null);
+	const [miColor, setMiColor] = useState(null);
 		const [highlights, setHighlights] = useState([]);
 		const [attackers, setAttackers] = useState([]);
-		const [gameOver, setGameOver] = useState(false);
-		const [lastMove, setLastMove] = useState(null);
+		const [juegoTerminado, setJuegoTerminado] = useState(false);
+		const [ultimoMovimiento, setUltimoMovimiento] = useState(null);
 
 	useEffect(() => {
 	// Inicializar el motor y cargar el tablero inicial
@@ -44,7 +44,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		// Si entramos en modo resume, aplicar inmediatamente los movimientos guardados
 	    if (mode === 'resume' && replayLog) {
 			engineRef.current = new MotorAjedrez();
-			const moves = parseMovesFromLog(replayLog);
+			const moves = parsearMovimientosDeLog(replayLog);
 			for (const m of moves) {
 				// Intentar aplicar con el motor para mantener historialMovimientos y estado consistente
 				const ok = engineRef.current.moverPieza(m.from, m.to);
@@ -61,10 +61,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			// ajustar lastMove al último movimiento aplicado
 			if (engineRef.current.historialMovimientos.length) {
 				const lm = engineRef.current.historialMovimientos[engineRef.current.historialMovimientos.length - 1];
-				setLastMove({ from: lm.from, to: lm.to });
+				setUltimoMovimiento({ from: lm.from, to: lm.to });
 			}
 			// guardar metadata de la partida cargada para permitir actualizarla
-			if (savedName) setSaveName(savedName);
+			if (savedName) setNombrePartida(savedName);
 			if (savedId) setLoadedSavedId(savedId);
 			setStatus('Partida cargada: lista para continuar');
 		}
@@ -77,10 +77,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			} catch (_) { myUserRef.current = null; }
 		})();
 
-		// cleanup on unmount: unsubscribe realtime and participants
+		// cleanup on unmount: desuscribir realtime y participantes
 		return () => {
-			try { unsubscribeRoom(); } catch (_) {}
-			try { unsubscribeParticipants(); } catch (_) {}
+			try { desuscribirSala(); } catch (_) {}
+			try { desuscribirParticipantes(); } catch (_) {}
 		};
 	}, []);
 
@@ -101,7 +101,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	// When loadedSharedId changes, initialize room state + subscription
 	useEffect(() => {
 		if (mode === 'multiplayer' && loadedSharedId) {
-			loadRoomState(loadedSharedId).then(() => subscribeToRoom(loadedSharedId, async (rec) => {
+			cargarEstadoSala(loadedSharedId).then(() => suscribirASala(loadedSharedId, async (rec) => {
 				try {
 					const myId = myUserRef.current?.id || null;
 					if (rec.by_user && myId && rec.by_user === myId) return;
@@ -114,18 +114,18 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						engineRef.current.board[from.row][from.col] = null;
 					}
 					setBoard(engineRef.current.obtenerTablero());
-					setLastMove({ from, to });
+					setUltimoMovimiento({ from, to });
 				} catch (e) { console.warn('remote move handler', e); }
 			}));
 
 			// load participants and subscribe to changes
-			loadParticipants(loadedSharedId).then(() => subscribeToParticipants(loadedSharedId, (evt) => {
+			loadParticipants(loadedSharedId).then(() => suscribirParticipantes(loadedSharedId, (evt) => {
 				// reload participants on any event
 				loadParticipants(loadedSharedId);
 				if (evt && evt.action === 'INSERT') {
 					// if second participant joined, clear waiting flag
 					const parts = participantsChannelRef.current; // just for trace
-					setWaitingForOpponent(false);
+					setEsperandoOponente(false);
 				}
 			}));
 		}
@@ -143,27 +143,27 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setParticipants(data || []);
 				console.log('loadParticipants ->', data || []);
 				const parts = data || [];
-				setWaitingForOpponent(parts.length < 2);
+				setEsperandoOponente(parts.length < 2);
 				// determine my color if I'm a participant
 				try {
 					const myId = myUserRef.current?.id || null;
 					if (myId) {
 						const mine = parts.find(p => String(p.user_id) === String(myId));
 						if (mine && mine.color) {
-							setMyColor(mine.color);
+							setMiColor(mine.color);
 							// flip board for black players
 							setFlipBoard(mine.color === 'b');
 						} else {
-							setMyColor(null);
+							setMiColor(null);
 						}
 					}
 					// If there are now 2 or more participants, ensure the room is initialized and subscribed
-					if (parts.length >= 2) {
-						setWaitingForOpponent(false);
+						if (parts.length >= 2) {
+						setEsperandoOponente(false);
 						try {
-							if (!roomChannelRef.current) {
-								await loadRoomState(roomId);
-								subscribeToRoom(roomId, async (rec) => {
+								if (!roomChannelRef.current) {
+								await cargarEstadoSala(roomId);
+								suscribirASala(roomId, async (rec) => {
 									try {
 										console.log('remote move received', rec);
 										const myId2 = myUserRef.current?.id || null;
@@ -177,17 +177,17 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 											engineRef.current.board[from.row][from.col] = null;
 										}
 										setBoard(engineRef.current.obtenerTablero());
-										setLastMove({ from, to });
+										setUltimoMovimiento({ from, to });
 									} catch (e) { console.warn('remote move handler', e); }
 								});
 							}
 						} catch (e) { console.warn('ensure subscribe after participants', e); }
 					}
-				} catch (e) { console.warn('determine myColor error', e); }
+				} catch (e) { console.warn('error determinando miColor', e); }
 			} catch (e) { console.warn('loadParticipants exception', e); }
 	}
 
-	function subscribeToParticipants(roomId, onEvent) {
+	function suscribirParticipantes(roomId, onEvent) {
 		try {
 			// unsubscribe if exists
 			if (participantsChannelRef.current) {
@@ -204,21 +204,21 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			chan.subscribe();
 			participantsChannelRef.current = chan;
 			return chan;
-		} catch (e) { console.warn('subscribeToParticipants error', e); }
+		} catch (e) { console.warn('suscribirParticipantes error', e); }
 	}
 
-	function unsubscribeParticipants() {
+	function desuscribirParticipantes() {
 		try {
 			if (participantsChannelRef.current) {
 				try { participantsChannelRef.current.unsubscribe(); } catch (_) {}
 				participantsChannelRef.current = null;
 			}
-		} catch (e) { console.warn('unsubscribeParticipants', e); }
+		} catch (e) { console.warn('desuscribirParticipantes', e); }
 	}
 
 	// --- Estado y helpers para guardar partida (local) ---
-	const [saveModalVisible, setSaveModalVisible] = useState(false);
-	const [saveName, setSaveName] = useState('');
+	const [modalGuardarVisible, setModalGuardarVisible] = useState(false);
+	const [nombrePartida, setNombrePartida] = useState('');
 	// buildLogFromHistory moved to src/utils/gameUtils.js
 
 	// Notación algebraica y helpers moved to src/utils/gameUtils.js
@@ -226,10 +226,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	async function finalizeMatch(winnerColor) {
 		try {
 			const winnerName = winnerColor === 'w' ? 'Blancas' : 'Negras';
-			const finalLog = buildLogFromHistory(engineRef.current) + `\nPartida finalizada: ${new Date().toISOString()}\nResultado: Ganador: ${winnerName}`;
-			const payload = {
+			const finalLog = construirLogHistorial(engineRef.current) + `\nPartida finalizada: ${new Date().toISOString()}\nResultado: Ganador: ${winnerName}`;
+				const payload = {
 				id: `match-${Date.now()}`,
-				name: saveName || `Partida ${new Date().toISOString()}`,
+				name: nombrePartida || `Partida ${new Date().toISOString()}`,
 				winner: winnerColor,
 				winnerName,
 				endedAt: new Date().toISOString(),
@@ -257,8 +257,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 	}
 
-	async function saveToLocal() {
-		const payload = { id: `local-${Date.now()}`, name: saveName || `Partida ${new Date().toISOString()}`, log_text: buildLogFromHistory(engineRef.current), savedAt: new Date().toISOString() };
+	async function guardarLocal() {
+			const payload = { id: `local-${Date.now()}`, name: nombrePartida || `Partida ${new Date().toISOString()}`, log_text: construirLogHistorial(engineRef.current), savedAt: new Date().toISOString() };
 		try {
 			setStatus('Guardando localmente...');
 			const raw = await AsyncStorage.getItem('saved_games');
@@ -266,7 +266,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			arr.push(payload);
 			await AsyncStorage.setItem('saved_games', JSON.stringify(arr));
 			setStatus('Partida guardada localmente');
-			setSaveModalVisible(false);
+			setModalGuardarVisible(false);
 			// Marcar que ahora la partida actual corresponde a la guardada (para futuras actualizaciones)
 			setLoadedSavedId(payload.id);
 		} catch (e) {
@@ -274,7 +274,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		}
 	}
 
-	async function updateToLocal() {
+	async function actualizarLocal() {
 		if (!loadedSavedId) {
 			setStatus('No hay partida cargada para actualizar');
 			return;
@@ -288,10 +288,10 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setStatus('No se encontró la partida local para actualizar');
 				return;
 			}
-			arr[idx].log_text = buildLogFromHistory(engineRef.current);
+			arr[idx].log_text = construirLogHistorial(engineRef.current);
 			arr[idx].savedAt = new Date().toISOString();
 			// keep name unless user changed it
-			arr[idx].name = saveName || arr[idx].name;
+			arr[idx].name = nombrePartida || arr[idx].name;
 			await AsyncStorage.setItem('saved_games', JSON.stringify(arr));
 			setStatus('Partida actualizada');
 		} catch (e) {
@@ -300,7 +300,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	}
 
 	// --- Supabase remote (shared_games) ---
-	async function createRemoteRoom() {
+	async function crearSalaRemota() {
 		try {
 			setStatus('Creando sala remota...');
 			// try v2 auth getUser() first
@@ -317,8 +317,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			}
 			const payload = {
 				owner_id: user.id,
-				name: saveName || `Partida ${new Date().toISOString()}`,
-				log_text: buildLogFromHistory(engineRef.current),
+				name: nombrePartida || `Partida ${new Date().toISOString()}`,
+				log_text: construirLogHistorial(engineRef.current),
 				public: false,
 				metadata: {}
 			};
@@ -340,7 +340,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			if (mode === 'multiplayer') {
 				// small delay to allow DB to register the room
 				setTimeout(() => {
-					loadRoomState(data.id).then(() => subscribeToRoom(data.id, async (rec) => {
+					cargarEstadoSala(data.id).then(() => suscribirASala(data.id, async (rec) => {
 						// handle remote move event
 						try {
 							const myId = myUserRef.current?.id || null;
@@ -354,7 +354,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 								engineRef.current.board[from.row][from.col] = null;
 							}
 							setBoard(engineRef.current.obtenerTablero());
-							setLastMove({ from, to });
+							setUltimoMovimiento({ from, to });
 						} catch (e) { console.warn('remote move handler', e); }
 					}));
 				}, 250);
@@ -365,15 +365,15 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 	}
 
 		// --- Real-time & room state helpers (moved to top-level of component) ---
-		async function loadRoomState(roomId) {
+		async function cargarEstadoSala(roomId) {
 			try {
 				setStatus('Cargando estado de la sala...');
 				// also try to load room metadata (invite code)
 				try {
 					const { data: gameMeta, error: gmErr } = await supabase.from('shared_games').select('metadata, owner_id').eq('id', roomId).maybeSingle();
-					if (gmErr) console.warn('loadRoomState metadata error', gmErr);
-					if (gameMeta && gameMeta.metadata && gameMeta.metadata.invite_code) setInviteCode(gameMeta.metadata.invite_code);
-					if (gameMeta && gameMeta.owner_id) setRoomOwnerId(gameMeta.owner_id);
+					if (gmErr) console.warn('cargarEstadoSala metadata error', gmErr);
+					if (gameMeta && gameMeta.metadata && gameMeta.metadata.invite_code) setCodigoInvitacion(gameMeta.metadata.invite_code);
+					if (gameMeta && gameMeta.owner_id) setIdPropietarioSala(gameMeta.owner_id);
 				} catch (me) { console.warn('metadata fetch error', me); }
 				const { data, error } = await supabase
 					.from('shared_game_moves')
@@ -401,16 +401,16 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setBoard(engineRef.current.obtenerTablero());
 				if (data && data.length) {
 					const last = data[data.length - 1];
-					setLastMove({ from: { row: last.from_row, col: last.from_col }, to: { row: last.to_row, col: last.to_col } });
+					setUltimoMovimiento({ from: { row: last.from_row, col: last.from_col }, to: { row: last.to_row, col: last.to_col } });
 				}
 				setStatus('Estado de sala cargado');
 			} catch (e) {
-				console.warn('loadRoomState error', e);
+				console.warn('cargarEstadoSala error', e);
 				setStatus('Error cargando sala');
 			}
 		}
 
-		function subscribeToRoom(roomId, onRemoteMove) {
+		function suscribirASala(roomId, onRemoteMove) {
 			try {
 				if (roomChannelRef.current) {
 					try { roomChannelRef.current.unsubscribe(); } catch (_) {}
@@ -426,21 +426,21 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setStatus(s => (s ? s + ' · Suscrito a sala' : 'Suscrito a sala'));
 				return chan;
 			} catch (e) {
-				console.warn('subscribeToRoom error', e);
+				console.warn('suscribirASala error', e);
 				setStatus('Error suscribiendo a sala');
 			}
 		}
 
-		function unsubscribeRoom() {
+		function desuscribirSala() {
 			try {
 				if (roomChannelRef.current) {
 					try { roomChannelRef.current.unsubscribe(); } catch (_) {}
 					roomChannelRef.current = null;
 				}
-			} catch (e) { console.warn('unsubscribeRoom', e); }
+			} catch (e) { console.warn('desuscribirSala', e); }
 		}
 
-		async function sendMoveToRoom(roomId, move) {
+		async function enviarMovimientoSala(roomId, move) {
 			try {
 				if (!roomId) return;
 				const user = myUserRef.current;
@@ -457,16 +457,16 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				};
 				const { data, error } = await supabase.from('shared_game_moves').insert([payload]).select();
 				if (error) {
-					console.warn('sendMoveToRoom error', error);
+					console.warn('enviarMovimientoSala error', error);
 					setStatus('Error enviando movimiento');
 				}
 			} catch (e) {
-				console.warn('sendMoveToRoom exception', e);
+				console.warn('enviarMovimientoSala exception', e);
 				setStatus('Error enviando movimiento');
 			}
 		}
 
-	async function updateRemoteRoom() {
+	async function actualizarSalaRemota() {
 		try {
 			if (!loadedSharedId) {
 				setStatus('No hay sala remota cargada para actualizar');
@@ -486,8 +486,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				setStatus('Necesitas iniciar sesión para actualizar la sala remota');
 				return;
 			}
-			const updates = { log_text: buildLogFromHistory(engineRef.current) };
-			if (saveName) updates.name = saveName;
+			const updates = { log_text: construirLogHistorial(engineRef.current) };
+			if (nombrePartida) updates.name = nombrePartida;
 			const { data, error } = await supabase.from('shared_games').update(updates).eq('id', loadedSharedId).eq('owner_id', user.id).select().single();
 			if (error) {
 				setStatus('Error actualizando sala remota: ' + (error.message || String(error)));
@@ -496,7 +496,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			setStatus('Sala remota actualizada: ' + String(loadedSharedId));
 			// if we haven't subscribed yet and in multiplayer, initialize
 			if (mode === 'multiplayer' && loadedSharedId && !roomChannelRef.current) {
-				loadRoomState(loadedSharedId).then(() => subscribeToRoom(loadedSharedId, async (rec) => {
+				cargarEstadoSala(loadedSharedId).then(() => suscribirASala(loadedSharedId, async (rec) => {
 					try {
 						const myId = myUserRef.current?.id || null;
 						if (rec.by_user && myId && rec.by_user === myId) return;
@@ -509,7 +509,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 							engineRef.current.board[from.row][from.col] = null;
 						}
 						setBoard(engineRef.current.obtenerTablero());
-						setLastMove({ from, to });
+						setUltimoMovimiento({ from, to });
 					} catch (e) { console.warn('remote move handler', e); }
 				}));
 			}
@@ -542,9 +542,9 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 
 	// tipoPiezaEsp & parseMovesFromLog moved to src/utils/gameUtils.js
 
-	async function playReplay(logText, speed = 500) {
+	async function reproducirPartida(logText, speed = 500) {
 		if (!logText) return;
-		const moves = parseMovesFromLog(logText);
+		const moves = parsearMovimientosDeLog(logText);
 		setReplayMoves(moves);
 		setIsPlaying(true);
 		// reset engine
@@ -563,7 +563,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				engineRef.current.board[m.from.row][m.from.col] = null;
 			}
 			setBoard(engineRef.current.obtenerTablero());
-			setLastMove({ from: m.from, to: m.to });
+			setUltimoMovimiento({ from: m.from, to: m.to });
 			await new Promise(res => setTimeout(res, speed));
 		}
 		setIsPlaying(false);
@@ -571,25 +571,25 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 
 	const handleSquarePress = async ({ row, col }) => {
 		if (!engineRef.current) return;
-		if (gameOver) {
+		if (juegoTerminado) {
 			// Partida terminada: ignorar interacciones posteriores (status ya indica resultado)
 			return;
 		}
 
 		// If we're waiting for opponent, block board interactions
-		if (mode === 'multiplayer' && waitingForOpponent) {
+		if (mode === 'multiplayer' && esperandoOponente) {
 			setStatus('Esperando oponente — las acciones del tablero están deshabilitadas');
 			return;
 		}
 
 		// In multiplayer, ensure user has a color and it's their turn
 		if (mode === 'multiplayer') {
-			if (!myColor) {
+			if (!miColor) {
 				setStatus('Aún no tienes color asignado');
 				return;
 			}
 			const turnoActual = engineRef.current.turnoActual || 'w';
-			if (turnoActual !== myColor) {
+			if (turnoActual !== miColor) {
 				setStatus('No es tu turno');
 				return;
 			}
@@ -651,19 +651,19 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			}
 		}
 
-		// Ejecutamos performMove y dejamos que esa función gestione el resultado
-		await performMove(selected, { row, col });
+		// Ejecutamos ejecutarMovimiento y dejamos que esa función gestione el resultado
+		await ejecutarMovimiento(selected, { row, col });
 	};
 
 	// Función auxiliar que ejecuta el movimiento en el motor y realiza las acciones posteriores
-	async function performMove(from, to, promotionType = null) {
+	async function ejecutarMovimiento(from, to, promotionType = null) {
 		if (!engineRef.current) return;
 		const moved = engineRef.current.moverPieza(from, to, promotionType);
 		if (moved) {
 			setBoard(engineRef.current.obtenerTablero());
 			setSelected(null);
 			setHighlights([]);
-			setLastMove({ from, to });
+			setUltimoMovimiento({ from, to });
 
 			// If multiplayer mode and we have a loadedSharedId, send the move to the room
 			if (mode === 'multiplayer' && loadedSharedId) {
@@ -672,9 +672,9 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 					from,
 					to,
 					piece: pieceObj,
-					san: moveToSAN({ from, to, piece: pieceObj }, engineRef.current)
+					san: movimientoASAN({ from, to, piece: pieceObj }, engineRef.current)
 				};
-				await sendMoveToRoom(loadedSharedId, mv);
+				await enviarMovimientoSala(loadedSharedId, mv);
 			}
 
 			if (mode === 'local' && autoRotateEnabled) setFlipBoard(s => !s);
@@ -682,7 +682,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
 				setAttackers([]);
-				setGameOver(true);
+				setJuegoTerminado(true);
 				return;
 			}
 
@@ -693,7 +693,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 				if (engineRef.current.esJaqueMate(opponent)) {
 					const winner = opponent === 'w' ? 'b' : 'w';
 					setStatus('Jaque mate');
-					setGameOver(true);
+					setJuegoTerminado(true);
 					await finalizeMatch(winner);
 				} else {
 					setStatus('Jaque');
@@ -714,8 +714,8 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 		setSelected(null);
 		setHighlights([]);
 		setAttackers([]);
-		setLastMove(null);
-		setGameOver(false);
+		setUltimoMovimiento(null);
+		setJuegoTerminado(false);
 		setStatus('');
 		// Restaurar orientación por defecto (blancas abajo)
 		setFlipBoard(false);
@@ -730,23 +730,23 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			setSelected(null);
 			setHighlights([]);
 			setAttackers([]);
-			setGameOver(false);
+			setJuegoTerminado(false);
 			setStatus('Movimiento deshecho');
 			// Actualizar lastMove al movimiento anterior en el historial (o null si no hay)
 			const mh = engineRef.current.historialMovimientos;
 			if (mh && mh.length) {
 				const lm = mh[mh.length - 1];
-				setLastMove({ from: lm.from, to: lm.to });
+				setUltimoMovimiento({ from: lm.from, to: lm.to });
 			} else {
-				setLastMove(null);
+				setUltimoMovimiento(null);
 			}
 
 			// Comprobar empate por solo reyes tras deshacer
 			if (engineRef.current.soloQuedanReyes && engineRef.current.soloQuedanReyes()) {
 				setStatus('Empate: solo quedan los reyes');
-				setGameOver(true);
+				setJuegoTerminado(true);
 			} else {
-				setGameOver(false);
+				setJuegoTerminado(false);
 			}
 
 			// Si estamos en modo local (pass-and-play) y la rotación automática está activada,
@@ -763,7 +763,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			{mode === 'replay' && savedName ? <Text style={{ fontWeight: '600', marginBottom: 8 }}>Reproduciendo: {savedName}</Text> : null}
 			{mode === 'replay' && replayLog ? (
 				<View style={{ flexDirection: 'row', marginBottom: 8 }}>
-					<TouchableOpacity style={styles.ctrlBtn} onPress={() => { if (!isPlaying) playReplay(replayLog); }}>
+					<TouchableOpacity style={styles.ctrlBtn} onPress={() => { if (!isPlaying) reproducirPartida(replayLog); }}>
 						<Text style={styles.ctrlText}>{isPlaying ? 'Reproduciendo...' : 'Reproducir'}</Text>
 					</TouchableOpacity>
 					<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#575555ff' }]} onPress={() => { setIsPlaying(false); }}>
@@ -795,25 +795,25 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 
 			{/* Tablero central */}
 			<View style={styles.boardContainer}>
-				<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} lastMove={attackers && attackers.length > 0 ? null : lastMove} flipped={flipBoard} />
+				<Board board={board} onSquarePress={handleSquarePress} selected={selected} highlights={highlights} attackers={attackers} ultimoMovimiento={attackers && attackers.length > 0 ? null : ultimoMovimiento} flipped={flipBoard} />
 			</View>
 
 			{/* Overlay que bloquea toda la pantalla mientras esperamos al oponente */}
-			{mode === 'multiplayer' && waitingForOpponent ? (
+			{mode === 'multiplayer' && esperandoOponente ? (
 				<View style={styles.screenOverlay} pointerEvents="auto">
 					<View style={styles.waitingContainer}>
 						<Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 8 }}>Esperando oponente</Text>
 						<Text style={{ marginBottom: 12 }}>Comparte este código para que se unan:</Text>
-						<Text selectable style={styles.inviteCode}>{inviteCode || loadedSharedId || savedId || '---'}</Text>
+						<Text selectable style={styles.inviteCode}>{codigoInvitacion || loadedSharedId || savedId || '---'}</Text>
 						{/* Participants debug info */}
 						<View style={{ marginTop: 12, width: '100%', alignItems: 'center' }}>
-							<Text style={{ marginBottom: 6 }}>Participantes: {participants ? participants.length : 0}</Text>
-							{participants && participants.map((p, i) => (
+							<Text style={{ marginBottom: 6 }}>Participantes: {participantes ? participantes.length : 0}</Text>
+							{participantes && participantes.map((p, i) => (
 								<Text key={i} style={{ fontSize: 12, color: '#333' }}>{p.color?.toUpperCase() || '?'} • {String(p.user_id).slice(0, 8)}{myUserRef.current && String(p.user_id) === String(myUserRef.current.id) ? ' (tú)' : ''}</Text>
 							))}
 						</View>
 							<View style={{ flexDirection: 'row', marginTop: 12 }}>
-							<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(inviteCode || loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
+							<TouchableOpacity style={[styles.btn, { marginRight: 8 }]} onPress={async () => { try { await Clipboard.setStringAsync(String(codigoInvitacion || loadedSharedId || savedId)); setStatus('Código copiado'); } catch(e){}}}>
 								<Text style={styles.btnText}>Copiar código</Text>
 							</TouchableOpacity>
 							<TouchableOpacity style={[styles.btn, { marginRight: 8, backgroundColor: '#c94a4a' }]} onPress={async () => {
@@ -821,13 +821,13 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 								try {
 									const myId = myUserRef.current?.id || null;
 									if (!myId) { setStatus('Necesitas estar autenticado para cerrar la sala'); return; }
-									if (!roomOwnerId || String(myId) !== String(roomOwnerId)) { setStatus('Solo el creador puede cerrar la sala'); return; }
+									if (!idPropietarioSala || String(myId) !== String(idPropietarioSala)) { setStatus('Solo el creador puede cerrar la sala'); return; }
 									setStatus('Cerrando sala...');
 									// delete participants first
 									await supabase.from('shared_game_participants').delete().eq('room_id', loadedSharedId);
 									// delete room
 									await supabase.from('shared_games').delete().eq('id', loadedSharedId);
-									unsubscribeParticipants(); unsubscribeRoom();
+									desuscribirParticipantes(); desuscribirSala();
 									setStatus('Sala cerrada');
 									if (onExit) onExit();
 								} catch (e) {
@@ -837,7 +837,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 							}}>
 								<Text style={styles.btnText}>Cerrar partida</Text>
 							</TouchableOpacity>
-							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { unsubscribeParticipants(); unsubscribeRoom(); if (onExit) onExit(); }}>
+							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => { desuscribirParticipantes(); desuscribirSala(); if (onExit) onExit(); }}>
 								<Text style={styles.btnText}>Salir</Text>
 							</TouchableOpacity>
 						</View>
@@ -864,7 +864,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			<View style={styles.controls}>
 				{/* Botón único que abre modal compacto de acciones */}
 				<TouchableOpacity style={[styles.ctrlBtn, { backgroundColor: '#444' }]} onPress={() => {
-					if (mode === 'multiplayer' && waitingForOpponent) { setStatus('Acciones no disponibles hasta que entre el oponente'); return; }
+					if (mode === 'multiplayer' && esperandoOponente) { setStatus('Acciones no disponibles hasta que entre el oponente'); return; }
 					setActionsModalVisible(true);
 				}}>
 					<Text style={styles.ctrlText}>Acciones</Text>
@@ -902,7 +902,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						>
 							<Text style={styles.actionBigBtnText}>Reiniciar</Text>
 						</TouchableOpacity>
-						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) updateToLocal(); else setSaveModalVisible(true); }}>
+						<TouchableOpacity style={[styles.actionBigBtn, { backgroundColor: '#2a7f2a' }]} onPress={() => { setActionsModalVisible(false); if (loadedSavedId) actualizarLocal(); else setModalGuardarVisible(true); }}>
 							<Text style={[styles.actionBigBtnText, { color: '#fff' }]}>Guardar</Text>
 						</TouchableOpacity>
 						{/* "Actualizar en la nube" eliminado según solicitud del usuario */}
@@ -929,14 +929,14 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			</Modal>
 
 			{/* Modal para guardar partida (local) */}
-			<Modal visible={saveModalVisible} transparent animationType="fade">
+			<Modal visible={modalGuardarVisible} transparent animationType="fade">
 				<View style={styles.modalBackdrop}>
 					<View style={[styles.modalCard, { width: '90%' }] }>
 						<Text style={styles.modalTitle}>Guardar partida (local)</Text>
-						<TextInput placeholder="Nombre de la partida" value={saveName} onChangeText={setSaveName} style={{ width: '100%', borderWidth: 1, borderColor:'#ddd', padding:8, borderRadius:6, marginBottom:12 }} />
+						<TextInput placeholder="Nombre de la partida" value={nombrePartida} onChangeText={setNombrePartida} style={{ width: '100%', borderWidth: 1, borderColor:'#ddd', padding:8, borderRadius:6, marginBottom:12 }} />
 						<View style={{ flexDirection:'row', width:'100%' }}>
-							<TouchableOpacity style={styles.btn} onPress={saveToLocal}><Text style={styles.btnText}>Guardar</Text></TouchableOpacity>
-							<TouchableOpacity style={[styles.btn, styles.btnClose, { marginLeft: 8 }]} onPress={() => setSaveModalVisible(false)}><Text style={styles.btnText}>Cancelar</Text></TouchableOpacity>
+							<TouchableOpacity style={styles.btn} onPress={guardarLocal}><Text style={styles.btnText}>Guardar</Text></TouchableOpacity>
+							<TouchableOpacity style={[styles.btn, styles.btnClose, { marginLeft: 8 }]} onPress={() => setModalGuardarVisible(false)}><Text style={styles.btnText}>Cancelar</Text></TouchableOpacity>
 						</View>
 					</View>
 				</View>
@@ -968,7 +968,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 									];
 									const labelStyle = [styles.promoOptionLabel, color === 'w' ? { color: '#fff' } : {}];
 									return (
-										<TouchableOpacity key={type} style={optionStyle} onPress={async () => { setPromotionModalVisible(false); if (promotionCandidate) await performMove(promotionCandidate.from, promotionCandidate.to, type); setPromotionCandidate(null); }}>
+										<TouchableOpacity key={type} style={optionStyle} onPress={async () => { setPromotionModalVisible(false); if (promotionCandidate) await ejecutarMovimiento(promotionCandidate.from, promotionCandidate.to, type); setPromotionCandidate(null); }}>
 											{src ? <Image source={src} style={styles.promoOptionImg} /> : <Text style={styles.actionBigBtnText}>{label}</Text>}
 											<Text style={labelStyle}>{label}</Text>
 										</TouchableOpacity>
@@ -990,7 +990,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 						<Text style={[styles.modalTitle, styles.historyModalTitle]}>Historial de Movimientos</Text>
 						<ScrollView style={{ maxHeight: 360, width: '100%' }}>
 							{(() => {
-								const pairs = buildAlgebraicPairs(engineRef.current);
+								const pairs = construirParesAlgebricos(engineRef.current);
 								return pairs.map((p, i) => (
 									<View key={i} style={styles.historyRow}>
 										<Text style={styles.historyNo}>{p.no}.</Text>
@@ -1014,7 +1014,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 			</Modal>
 
 			{/* Modal de fin de partida */}
-			<Modal visible={gameOver} transparent animationType="fade">
+			<Modal visible={juegoTerminado} transparent animationType="fade">
 				<View style={styles.modalBackdrop}>
 					<View style={styles.modalCard}>
 						<Text style={styles.modalTitle}>Partida terminada</Text>
@@ -1034,7 +1034,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 							>
 								<Text style={styles.btnText}>Deshacer</Text>
 							</TouchableOpacity>
-							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => setGameOver(false)}>
+							<TouchableOpacity style={[styles.btn, styles.btnClose]} onPress={() => setJuegoTerminado(false)}>
 								<Text style={styles.btnText}>Cerrar</Text>
 							</TouchableOpacity>
 						</View>

@@ -8,7 +8,7 @@ import PIECE_IMAGES from './icons';
  * - board: 8x8 matrix with piece symbols or null
  * - onSquarePress: function({ row, col })
  */
-export default function Board({ board = [], onSquarePress = () => {}, selected = null, highlights = [], attackers = [], lastMove = null, flipped = false }) {
+export default function Board({ board = [], onSquarePress = () => {}, selected = null, highlights = [], attackers = [], ultimoMovimiento = null, flipped = false }) {
   const overlayAnim = useRef(new Animated.Value(0)).current;
   const moveAnim = useRef(new Animated.Value(0)).current;
 
@@ -33,7 +33,7 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
   }, [highlights]);
 
   useEffect(() => {
-    if (lastMove && lastMove.to) {
+    if (ultimoMovimiento && ultimoMovimiento.to) {
       // Animate the moved piece: rotateY 0 -> 180deg
       moveAnim.setValue(0);
       Animated.timing(moveAnim, {
@@ -42,7 +42,7 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
         useNativeDriver: true,
       }).start();
     }
-  }, [lastMove]);
+  }, [ultimoMovimiento]);
   // Helper to render a single square
   const renderSquare = (piece, row, col) => {
     const isLight = (row + col) % 2 === 0;
@@ -53,8 +53,8 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
     const hl = highlights.find(h => h.row === row && h.col === col);
     const isHighlighted = !!hl;
     const isAttacker = attackers.some(a => a.row === row && a.col === col);
-    const isLastMoveFrom = lastMove && lastMove.from && lastMove.from.row === row && lastMove.from.col === col;
-    const isLastMoveTo = lastMove && lastMove.to && lastMove.to.row === row && lastMove.to.col === col;
+    const isLastMoveFrom = ultimoMovimiento && ultimoMovimiento.from && ultimoMovimiento.from.row === row && ultimoMovimiento.from.col === col;
+    const isLastMoveTo = ultimoMovimiento && ultimoMovimiento.to && ultimoMovimiento.to.row === row && ultimoMovimiento.to.col === col;
 
     return (
       <TouchableOpacity
@@ -72,7 +72,7 @@ export default function Board({ board = [], onSquarePress = () => {}, selected =
       >
         {pieceImage ? (
           (() => {
-            const isMovedDest = lastMove && lastMove.to && lastMove.to.row === row && lastMove.to.col === col;
+            const isMovedDest = ultimoMovimiento && ultimoMovimiento.to && ultimoMovimiento.to.row === row && ultimoMovimiento.to.col === col;
             const AniImage = Animated.createAnimatedComponent(Image);
             const rotate = moveAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
             const imgStyle = [{ width: squareSize * 0.78, height: squareSize * 0.78 }];

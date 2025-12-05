@@ -13,14 +13,14 @@ export function tipoPiezaEsp(type) {
   }
 }
 
-export function squareToAlgebraic({ row, col }) {
+export function casillaAAlgebraica({ row, col }) {
   if (row == null || col == null) return '??';
   const file = String.fromCharCode(97 + col); // a..h
   const rank = 8 - row; // row 0 -> 8
   return `${file}${rank}`;
 }
 
-export function moveToSAN(move, engineInstance) {
+export function movimientoASAN(move, engineInstance) {
   if (!move || !move.piece) return '??';
   const color = move.piece.color;
   const type = (move.piece.type || 'p').toLowerCase();
@@ -28,7 +28,7 @@ export function moveToSAN(move, engineInstance) {
   if (type === 'k' && Math.abs(move.from.col - move.to.col) === 2) {
     return move.to.col > move.from.col ? 'O-O' : 'O-O-O';
   }
-  const dest = squareToAlgebraic(move.to);
+  const dest = casillaAAlgebraica(move.to);
   const isCapture = !!(move.capturedPiece || move.capture);
   const promo = move.special && move.special.promoted ? '=' + tipoPiezaEsp(move.special.promotedTo || 'q') : '';
 
@@ -71,13 +71,13 @@ export function moveToSAN(move, engineInstance) {
   return `${pieceLetter}${disamb}${capMark}${dest}${promo}`;
 }
 
-export function buildAlgebraicPairs(engineInstance) {
+export function construirParesAlgebricos(engineInstance) {
   const hist = engineInstance ? (engineInstance.historialMovimientos || []) : [];
   const tempEngine = new MotorAjedrez();
   const pairs = [];
   for (let i = 0; i < hist.length; i++) {
     const mv = hist[i];
-    const san = moveToSAN(mv, tempEngine);
+    const san = movimientoASAN(mv, tempEngine);
     const pieceKey = mv.piece && mv.piece.type ? `${mv.piece.color}${mv.piece.type}` : null;
     const ok = tempEngine.moverPieza(mv.from, mv.to);
     if (!ok) {
@@ -95,7 +95,7 @@ export function buildAlgebraicPairs(engineInstance) {
   return pairs;
 }
 
-export function parseMovesFromLog(logText) {
+export function parsearMovimientosDeLog(logText) {
   const lines = String(logText).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const moves = [];
   for (const line of lines) {
@@ -107,7 +107,7 @@ export function parseMovesFromLog(logText) {
   return moves;
 }
 
-export function buildLogFromHistory(engineInstance) {
+export function construirLogHistorial(engineInstance) {
   if (!engineInstance) return '';
   const header = `Partida iniciada: ${new Date().toISOString()}`;
   const lines = (engineInstance.historialMovimientos || []).map(m => {

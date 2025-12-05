@@ -81,16 +81,16 @@ export class MotorAjedrez {
       const rowDiff = to.row - from.row;
       const colDiff = to.col - from.col;
       if (Math.abs(colDiff) === 1 && rowDiff === dir && this.board[to.row][to.col] === null) {
-        const last = this.historialMovimientos.length ? this.historialMovimientos[this.historialMovimientos.length - 1] : null;
-        if (last && last.piece && last.piece.type === 'p' && last.piece.color !== piece.color) {
-          if (Math.abs(last.from.row - last.to.row) === 2 && last.to.row === from.row && last.to.col === to.col) {
-            capturedPiece = { ...this.board[last.to.row][last.to.col] };
-            moveRecord.capturedPiece = capturedPiece ? { ...capturedPiece } : null;
-            moveRecord.special.isEnPassant = true;
-            moveRecord.special.enPassantCaptured = { row: last.to.row, col: last.to.col };
-            this.board[last.to.row][last.to.col] = null;
+        const ultimo = this.historialMovimientos.length ? this.historialMovimientos[this.historialMovimientos.length - 1] : null;
+          if (ultimo && ultimo.piece && ultimo.piece.type === 'p' && ultimo.piece.color !== piece.color) {
+            if (Math.abs(ultimo.from.row - ultimo.to.row) === 2 && ultimo.to.row === from.row && ultimo.to.col === to.col) {
+              capturedPiece = { ...this.board[ultimo.to.row][ultimo.to.col] };
+              moveRecord.capturedPiece = capturedPiece ? { ...capturedPiece } : null;
+              moveRecord.special.isEnPassant = true;
+              moveRecord.special.enPassantCaptured = { row: ultimo.to.row, col: ultimo.to.col };
+              this.board[ultimo.to.row][ultimo.to.col] = null;
+            }
           }
-        }
       }
     }
 
@@ -170,41 +170,41 @@ export class MotorAjedrez {
       return false;
     }
 
-    const lastMove = this.historialMovimientos.pop(); 
+    const ultimoMovimiento = this.historialMovimientos.pop(); 
 
     // Restaurar pieza origen
-    this.board[lastMove.from.row][lastMove.from.col] = lastMove.piece;
+    this.board[ultimoMovimiento.from.row][ultimoMovimiento.from.col] = ultimoMovimiento.piece;
 
     // Restaurar captura
-    if (lastMove.special && lastMove.special.isEnPassant && lastMove.special.enPassantCaptured) {
-      const capPos = lastMove.special.enPassantCaptured;
-      this.board[capPos.row][capPos.col] = lastMove.capturedPiece;
-      if (lastMove.capturedPiece) {
-        const arr = this.piezasCapturadas[lastMove.capturedPiece.color];
+    if (ultimoMovimiento.special && ultimoMovimiento.special.isEnPassant && ultimoMovimiento.special.enPassantCaptured) {
+      const capPos = ultimoMovimiento.special.enPassantCaptured;
+      this.board[capPos.row][capPos.col] = ultimoMovimiento.capturedPiece;
+      if (ultimoMovimiento.capturedPiece) {
+        const arr = this.piezasCapturadas[ultimoMovimiento.capturedPiece.color];
         if (arr && arr.length) arr.pop();
       }
-      this.board[lastMove.to.row][lastMove.to.col] = null;
+      this.board[ultimoMovimiento.to.row][ultimoMovimiento.to.col] = null;
     } else {
-      this.board[lastMove.to.row][lastMove.to.col] = lastMove.capturedPiece;
-      if (lastMove.capturedPiece) {
-        const arr = this.piezasCapturadas[lastMove.capturedPiece.color];
+      this.board[ultimoMovimiento.to.row][ultimoMovimiento.to.col] = ultimoMovimiento.capturedPiece;
+      if (ultimoMovimiento.capturedPiece) {
+        const arr = this.piezasCapturadas[ultimoMovimiento.capturedPiece.color];
         if (arr && arr.length) arr.pop();
       }
     }
 
     // Restaurar torre si fue enroque
-    if (lastMove.special && lastMove.special.isCastling && lastMove.special.rookFrom && lastMove.special.rookTo) {
-      const rf = lastMove.special.rookFrom;
-      const rt = lastMove.special.rookTo;
-      this.board[rf.row][rf.col] = lastMove.special.rookPiece ? { ...lastMove.special.rookPiece } : null;
+    if (ultimoMovimiento.special && ultimoMovimiento.special.isCastling && ultimoMovimiento.special.rookFrom && ultimoMovimiento.special.rookTo) {
+      const rf = ultimoMovimiento.special.rookFrom;
+      const rt = ultimoMovimiento.special.rookTo;
+      this.board[rf.row][rf.col] = ultimoMovimiento.special.rookPiece ? { ...ultimoMovimiento.special.rookPiece } : null;
       this.board[rt.row][rt.col] = null;
     }
 
     // Revertir turno
     this.turnoActual = this.turnoActual === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
 
-    const lastPieceId = lastMove.piece && lastMove.piece.type ? `${lastMove.piece.color}${lastMove.piece.type}` : JSON.stringify(lastMove.piece);
-    console.log(`Movimiento deshecho: ${lastPieceId} vuelto a ${lastMove.from.row},${lastMove.from.col}`);
+    const ultimaPiezaId = ultimoMovimiento.piece && ultimoMovimiento.piece.type ? `${ultimoMovimiento.piece.color}${ultimoMovimiento.piece.type}` : JSON.stringify(ultimoMovimiento.piece);
+    console.log(`Movimiento deshecho: ${ultimaPiezaId} vuelto a ${ultimoMovimiento.from.row},${ultimoMovimiento.from.col}`);
     return true;
   }
 
