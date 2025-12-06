@@ -9,7 +9,7 @@ import supabase from '../utils/supabaseClient';
 import * as Clipboard from 'expo-clipboard';
 import { tipoPiezaEsp, casillaAAlgebraica, movimientoASAN, construirParesAlgebricos, parsearMovimientosDeLog, construirLogHistorial } from '../utils/gameUtils';
 
-export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit: alSalir }) {
+export default function GameScreen({ mode = 'local', replayLog = null, savedName = null, savedId = null, roomId = null, inviteCode: inviteCodeProp = null, onExit = null }) {
 	const engineRef = useRef();
 	const [board, setBoard] = useState([]);
 	const [selected, setSelected] = useState(null);
@@ -140,7 +140,7 @@ export default function GameScreen({ mode = 'local', replayLog = null, savedName
 					console.warn('loadParticipants error', error);
 					return;
 				}
-				setParticipants(data || []);
+				setParticipantes(data || []);
 				console.log('loadParticipants ->', data || []);
 				const parts = data || [];
 				setEsperandoOponente(parts.length < 2);
