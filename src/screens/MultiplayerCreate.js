@@ -79,11 +79,11 @@ export default function MultiplayerCreate({ onNavigate }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, alignItems: 'center' },
-  title: { fontSize: 20, fontWeight: '700', marginBottom: 8 },
-  label: { alignSelf: 'flex-start', marginTop: 12, marginBottom: 6 },
-  input: { width: '100%', padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
-  btn: { width: '100%', padding: 12, backgroundColor: '#2f95dc', borderRadius: 8, marginTop: 12, alignItems: 'center' },
+  container: { flex: 1, padding: 20, alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 20, fontWeight: '700', marginBottom: 8, textAlign: 'center' },
+  label: { alignSelf: 'center', marginTop: 12, marginBottom: 6, textAlign: 'center' },
+  input: { width: '90%', padding: 10, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
+  btn: { width: '90%', padding: 12, backgroundColor: '#2f95dc', borderRadius: 8, marginTop: 12, alignItems: 'center' },
   btnText: { color: '#fff', fontWeight: '700' },
   result: { marginTop: 16, alignItems: 'center' },
   resultLabel: { fontWeight: '700' },
